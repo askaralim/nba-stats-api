@@ -81,13 +81,37 @@ GET /api/nba/games/:gameId
 
 ## Deployment
 
-The backend can be deployed to:
+### Railway Deployment
+
+1. **Install Railway CLI** (optional but recommended):
+   ```bash
+   npm i -g @railway/cli
+   ```
+
+2. **Deploy via Railway Dashboard**:
+   - Go to [railway.app](https://railway.app)
+   - Click "New Project"
+   - Select "Deploy from GitHub repo" (connect your GitHub account)
+   - Select the `nba-stats-api` directory
+   - Railway will automatically detect Node.js and deploy
+
+3. **Set Environment Variables** in Railway:
+   - `CORS_ORIGIN`: Your frontend URL (e.g., `https://your-frontend.vercel.app`)
+   - `NODE_ENV`: `production` (optional, Railway sets this automatically)
+   - `PORT`: Railway automatically provides this (no need to set manually)
+
+4. **Get Your API URL**:
+   - Railway will provide a URL like: `https://your-app-name.up.railway.app`
+   - Use this URL in your frontend's `VITE_API_URL` environment variable
+
+### Other Deployment Options
+
+The backend can also be deployed to:
 - Heroku
-- Railway
 - Render
 - AWS EC2
 - DigitalOcean
 - Any Node.js hosting platform
 
-Set the `CORS_ORIGIN` environment variable to your frontend URL in production.
+**Important**: Set the `CORS_ORIGIN` environment variable to your frontend URL in production.
 
