@@ -2,6 +2,8 @@ const express = require('express');
 const nbaService = require('./services/nbaService');
 const espnScraperService = require('./services/espnScraperService');
 const standingsService = require('./services/standingsService');
+const teamService = require('./services/teamService');
+const newsService = require('./services/newsService');
 const gameTransformer = require('./utils/gameTransformer');
 
 class WebServer {
@@ -139,6 +141,48 @@ class WebServer {
         console.error('Error fetching standings:', error);
         res.status(500).json({
           error: 'Failed to fetch standings',
+          message: error.message
+        });
+      }
+    });
+
+    // Get team details (info + statistics)
+    this.app.get('/api/nba/teams/:teamAbbreviation', async (req, res) => {
+      try {
+        const { teamAbbreviation } = req.params;
+        
+        // Fetch both team info and statistics in parallel
+        const [teamInfo, teamStats] = await Promise.all([
+          teamService.getTeamInfo(teamAbbreviation),
+          teamService.getTeamStatistics(teamAbbreviation)
+        ]);
+
+        res.json({
+          team: teamInfo,
+          statistics: teamStats
+        });
+      } catch (error) {
+        console.error('Error fetching team details:', error);
+        res.status(500).json({
+          error: 'Failed to fetch team details',
+          message: error.message
+        });
+      }
+    });
+
+    // Get NBA news (Shams Charania tweets)
+    this.app.get('/api/nba/news', async (req, res) => {
+      try {
+        const tweets = await newsService.getShamsTweets();
+        res.json({
+          tweets: tweets,
+          source: 'Twitter/X',
+          author: 'Shams Charania'
+        });
+      } catch (error) {
+        console.error('Error fetching news:', error);
+        res.status(500).json({
+          error: 'Failed to fetch news',
           message: error.message
         });
       }
