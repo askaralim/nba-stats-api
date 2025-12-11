@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const WebServer = require('./server');
 
 const PORT = process.env.PORT || 3000;

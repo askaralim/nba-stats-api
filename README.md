@@ -1,19 +1,20 @@
-# NBA Stats Backend API
+# NBA Stats API
 
-RESTful API backend for NBA statistics application.
+RESTful API backend for NBA statistics application using ESPN APIs.
 
 ## Features
 
-- Today's games scoreboard
-- Game details with period-by-period scores
-- Game leaders statistics
-- Caching for improved performance
+- **Games Scoreboard**: Get games for any date with live scores and status
+- **Game Details**: Detailed game information with boxscore and player statistics
+- **Player Statistics**: Season statistics by category (points, assists, rebounds, etc.)
+- **Team Standings**: Current NBA standings by conference
+- **Caching**: In-memory caching for improved performance and reduced API calls
 
 ## Tech Stack
 
 - Node.js
 - Express.js
-- NBA Official API
+- ESPN API (Scoreboard, Summary, Player Stats, Standings)
 
 ## Getting Started
 
@@ -25,13 +26,38 @@ npm install
 
 ### Environment Variables
 
-Create a `.env` file:
+**Quick Setup:**
+
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. The `.env` file is already configured with default values for local development.
+
+**Manual Setup:**
+
+If you prefer to create `.env` manually, use the following content:
 
 ```env
+# Server Configuration
 PORT=3000
 NODE_ENV=development
+
+# CORS Configuration
+# For local development, use http://localhost:5173 (Vite default port)
 CORS_ORIGIN=http://localhost:5173
 ```
+
+**Environment Variables:**
+- `PORT`: Server port (default: 3000)
+- `NODE_ENV`: Environment (development/production)
+- `CORS_ORIGIN`: Frontend URL for CORS (required for production)
+
+**Note**: 
+- The `.env` file is gitignored and won't be committed to the repository
+- The project uses `dotenv` to automatically load environment variables from `.env` file
+- For production (Railway), set environment variables in the Railway dashboard instead of using `.env`
 
 ### Running
 
@@ -49,21 +75,33 @@ Server runs on `http://localhost:3000` (or PORT from .env)
 
 ## API Endpoints
 
-### Get Today's Games
+### Get Games for a Date
 ```
-GET /api/nba/games/today?leagueId=00
+GET /api/nba/games/today?date=20251210
 ```
+
+**Query Parameters:**
+- `date` (optional): Date in YYYYMMDD format (defaults to today)
 
 **Response:**
 ```json
 {
-  "date": "2025-11-24",
+  "date": "2025-12-10",
   "totalGames": 5,
-  "games": [...]
+  "games": [
+    {
+      "gameId": "401809835",
+      "gameStatus": 3,
+      "gameStatusText": "Final",
+      "homeTeam": {...},
+      "awayTeam": {...},
+      "gameLeaders": {...}
+    }
+  ]
 }
 ```
 
-### Get Game Details
+### Get Game Details with Boxscore
 ```
 GET /api/nba/games/:gameId
 ```
@@ -71,11 +109,50 @@ GET /api/nba/games/:gameId
 **Response:**
 ```json
 {
-  "gameId": "0022500283",
-  "gameStatusText": "Final",
+  "gameId": "401809835",
+  "gameStatus": 3,
   "homeTeam": {...},
   "awayTeam": {...},
-  ...
+  "boxscore": {
+    "teams": [
+      {
+        "teamName": "Oklahoma City Thunder",
+        "starters": [...],
+        "bench": [...]
+      }
+    ]
+  }
+}
+```
+
+### Get Player Statistics
+```
+GET /api/nba/stats/players?season=2026|2&position=all-positions&page=1&limit=50&sort=offensive.avgPoints:desc
+```
+
+**Query Parameters:**
+- `season`: Season in format "YYYY|type" (e.g., "2026|2" for regular season, "2026|3" for postseason)
+- `position`: Position filter (all-positions, guard, forward, center)
+- `page`: Page number (default: 1)
+- `limit`: Items per page (default: 50)
+- `sort`: Sort field (e.g., "offensive.avgPoints:desc")
+
+### Get Team Standings
+```
+GET /api/nba/standings?season=2026&seasonType=2
+```
+
+**Query Parameters:**
+- `season`: Season year (default: 2026)
+- `seasonType`: Season type (2 = Regular Season, 3 = Postseason)
+
+**Response:**
+```json
+{
+  "standings": {
+    "East": [...],
+    "West": [...]
+  }
 }
 ```
 
