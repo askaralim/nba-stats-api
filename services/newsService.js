@@ -1,39 +1,48 @@
 /**
  * News Service
- * Scrapes NBA news from Twitter/X using Puppeteer
+ * Scrapes NBA news from Twitter/X using Nitter (privacy-focused Twitter frontend)
+ * Nitter instances: https://github.com/zedeus/nitter/wiki/Instances
  */
 
-const puppeteer = require('puppeteer');
+const axios = require('axios');
+const cheerio = require('cheerio');
 
 class NewsService {
   constructor() {
     this.cache = new Map();
     this.cacheTimeout = 300000; // 5 minutes cache
-    this.browser = null;
+    
+    // List of Nitter instances to try (in order of preference)
+    // Based on: https://github.com/zedeus/nitter/wiki/Instances
+    this.nitterInstances = [
+      'https://nitter.net', // Official instance
+      'https://xcancel.com',
+      'https://nitter.poast.org',
+      'https://nitter.privacyredirect.com',
+      'https://nitter.space',
+      'https://nitter.tiekoetter.com'
+    ];
+    this.currentInstanceIndex = 0;
   }
 
   /**
-   * Get or create browser instance
-   * @returns {Promise<Browser>} Puppeteer browser instance
+   * Get the current Nitter instance URL
+   * @returns {string} Nitter instance URL
    */
-  async getBrowser() {
-    if (!this.browser) {
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu'
-        ]
-      });
-    }
-    return this.browser;
+  getCurrentInstance() {
+    return this.nitterInstances[this.currentInstanceIndex];
   }
 
   /**
-   * Get tweets from Shams Charania's Twitter/X account using Puppeteer
+   * Try the next Nitter instance if current one fails
+   */
+  rotateInstance() {
+    this.currentInstanceIndex = (this.currentInstanceIndex + 1) % this.nitterInstances.length;
+    console.log(`Switching to Nitter instance: ${this.getCurrentInstance()}`);
+  }
+
+  /**
+   * Get tweets from Shams Charania's Twitter/X account using Nitter
    * @returns {Promise<Array>} Array of tweet objects
    */
   async getShamsTweets() {
@@ -44,186 +53,130 @@ class NewsService {
       return cached.data;
     }
 
-    let page = null;
-    try {
-      const browser = await this.getBrowser();
-      page = await browser.newPage();
-      
-      // Set viewport and user agent
-      await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      
-      const url = 'https://x.com/ShamsCharania';
-      console.log(`Navigating to ${url}...`);
-      
-      // Navigate to the page
-      await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
+    const maxRetries = this.nitterInstances.length;
+    let lastError = null;
 
-      // Wait for tweets to load
-      console.log('Waiting for tweets to load...');
+    // Try each Nitter instance until one works
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const nitterUrl = this.getCurrentInstance();
+      const url = `${nitterUrl}/ShamsCharania`;
+      
       try {
-        // Wait for article elements (tweets) to appear
-        await page.waitForSelector('article', { timeout: 15000 });
+        console.log(`Attempting to fetch tweets from ${url}...`);
         
-        // Additional wait for content to fully render
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      } catch (waitError) {
-        console.warn('Timeout waiting for tweets, proceeding with available content...');
-      }
+        const res = await axios.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': nitterUrl
+          },
+          timeout: 15000 // 15 second timeout
+        });
 
-      // Extract tweets from the page
-      const tweets = await page.evaluate(() => {
-        const tweetElements = document.querySelectorAll('article');
-        const extractedTweets = [];
+        const $ = cheerio.load(res.data);
+        const tweets = [];
         const seenTexts = new Set();
 
-        tweetElements.forEach((article) => {
-          // Try multiple methods to extract tweet text
-          let tweetText = '';
-          let tweetImages = [];
-          
-          // Method 1: Look for div[data-testid="tweetText"]
-          const tweetTextDiv = article.querySelector('div[data-testid="tweetText"]');
-          if (tweetTextDiv) {
-            tweetText = tweetTextDiv.innerText.trim();
-          }
-          
-          // Method 2: If not found, try to get text from spans
-          if (!tweetText || tweetText.length < 20) {
-            const spans = article.querySelectorAll('span');
-            const textParts = [];
-            spans.forEach(span => {
-              const text = span.innerText.trim();
-              // Filter out handles, links, and very short text
-              if (text.length > 10 && 
-                  !text.startsWith('@') && 
-                  !text.startsWith('http') &&
-                  !text.includes('·') &&
-                  !text.match(/^\d+[hms]$/)) {
-                textParts.push(text);
-              }
-            });
-            tweetText = textParts.join(' ').trim();
-          }
-
-          // Method 3: Fallback to getting all text from article
-          if (!tweetText || tweetText.length < 20) {
-            const allText = article.innerText;
-            // Try to extract the main tweet text (usually the longest paragraph)
-            const lines = allText.split('\n').filter(line => 
-              line.trim().length > 20 && 
-              !line.trim().startsWith('@') &&
-              !line.trim().startsWith('http') &&
-              !line.includes('Show this thread') &&
-              !line.includes('Replying to')
-            );
-            if (lines.length > 0) {
-              tweetText = lines[0].trim();
-            }
-          }
+        // Extract tweets from Nitter's timeline-item structure
+        $('div.timeline-item').each((_, el) => {
+          const text = $(el).find('.tweet-content').text().trim();
+          const time = $(el).find('span.tweet-date > a').attr('title');
+          const link = $(el).find('span.tweet-date > a').attr('href');
+          const fullLink = link ? `https://x.com${link}` : null;
 
           // Extract images from the tweet
-          // Method 1: Look for img tags within the article
-          const images = article.querySelectorAll('img');
-          images.forEach(img => {
-            const src = img.src || img.getAttribute('src');
+          const images = [];
+          $(el).find('.tweet-body img').each((_, img) => {
+            const src = $(img).attr('src');
             if (src && 
-                !src.includes('profile_images') && 
+                !src.includes('avatar') && 
                 !src.includes('emoji') &&
                 !src.includes('data:image/svg') &&
                 (src.startsWith('http') || src.startsWith('https'))) {
-              // Check if it's a tweet image (usually contains 'pbs.twimg.com' or similar)
-              if (src.includes('pbs.twimg.com') || src.includes('media')) {
-                tweetImages.push(src);
+              // Nitter uses proxy URLs, convert to direct image URL if possible
+              // Or use the Nitter proxy URL directly
+              if (src.startsWith('http')) {
+                images.push(src);
+              } else if (src.startsWith('/')) {
+                // Relative URL, make it absolute
+                images.push(`${nitterUrl}${src}`);
               }
             }
           });
 
-          // Method 2: Look for div[data-testid="tweetPhoto"] or similar containers
-          const photoContainers = article.querySelectorAll('[data-testid*="Photo"], [data-testid*="image"]');
-          photoContainers.forEach(container => {
-            const img = container.querySelector('img');
-            if (img) {
-              const src = img.src || img.getAttribute('src');
-              if (src && 
-                  !src.includes('profile_images') && 
-                  !src.includes('emoji') &&
-                  !src.includes('data:image/svg') &&
-                  (src.startsWith('http') || src.startsWith('https'))) {
-                if (src.includes('pbs.twimg.com') || src.includes('media')) {
-                  if (!tweetImages.includes(src)) {
-                    tweetImages.push(src);
-                  }
+          // Also check for attached images in tweet-media containers
+          $(el).find('.attachments img, .tweet-media img').each((_, img) => {
+            const src = $(img).attr('src');
+            if (src && 
+                !src.includes('avatar') && 
+                !src.includes('emoji') &&
+                !src.includes('data:image/svg') &&
+                (src.startsWith('http') || src.startsWith('https'))) {
+              if (src.startsWith('http')) {
+                if (!images.includes(src)) {
+                  images.push(src);
+                }
+              } else if (src.startsWith('/')) {
+                const absoluteUrl = `${nitterUrl}${src}`;
+                if (!images.includes(absoluteUrl)) {
+                  images.push(absoluteUrl);
                 }
               }
             }
           });
 
-          // Remove duplicates from images array
-          tweetImages = [...new Set(tweetImages)];
-
-          // Add tweet if it's valid and not a duplicate
-          if (tweetText && tweetText.length > 20 && !seenTexts.has(tweetText)) {
-            seenTexts.add(tweetText);
-            extractedTweets.push({
-              text: tweetText,
-              images: tweetImages
+          if (text && text.length > 0 && !seenTexts.has(text)) {
+            seenTexts.add(text);
+            tweets.push({
+              text: text,
+              time: time,
+              link: fullLink,
+              images: images
             });
           }
         });
 
-        return extractedTweets;
-      });
+        if (tweets.length > 0) {
+          // Format tweets as objects
+          const formattedTweets = tweets
+            .slice(0, 10) // Latest 10 tweets
+            .map((tweet, index) => ({
+              id: `shams_${Date.now()}_${index}`,
+              author: 'Shams Charania',
+              authorHandle: '@ShamsCharania',
+              text: tweet.text,
+              images: tweet.images || [],
+              link: tweet.link,
+              timestamp: tweet.time ? new Date(tweet.time).toISOString() : new Date().toISOString()
+            }));
 
-      // Format tweets as objects
-      const formattedTweets = tweets
-        .slice(0, 10) // Latest 10 tweets
-        .map((tweet, index) => ({
-          id: `shams_${Date.now()}_${index}`,
-          author: 'Shams Charania',
-          authorHandle: '@ShamsCharania',
-          text: tweet.text || tweet, // Handle both object and string formats
-          images: tweet.images || [],
-          timestamp: new Date().toISOString()
-        }));
+          // Cache the response
+          this.cache.set(cacheKey, {
+            data: formattedTweets,
+            timestamp: Date.now()
+          });
 
-      // Cache the response
-      this.cache.set(cacheKey, {
-        data: formattedTweets,
-        timestamp: Date.now()
-      });
-
-      console.log(`Successfully extracted ${formattedTweets.length} tweets`);
-      return formattedTweets;
-    } catch (error) {
-      console.error('Error fetching Shams tweets:', error.message);
-      console.error('Error stack:', error.stack);
-      
-      // Return mock data on error
-      return this.getMockTweets();
-    } finally {
-      // Close the page but keep the browser open for reuse
-      if (page) {
-        try {
-          await page.close();
-        } catch (closeError) {
-          console.error('Error closing page:', closeError.message);
+          console.log(`Successfully extracted ${formattedTweets.length} tweets from ${nitterUrl}`);
+          return formattedTweets;
+        } else {
+          throw new Error('No tweets found on page');
+        }
+      } catch (error) {
+        console.error(`Error fetching from ${nitterUrl}:`, error.message);
+        lastError = error;
+        
+        // Try next instance
+        if (attempt < maxRetries - 1) {
+          this.rotateInstance();
         }
       }
     }
-  }
 
-  /**
-   * Cleanup browser instance
-   */
-  async closeBrowser() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-    }
+    // All instances failed, return mock data
+    console.error('All Nitter instances failed. Returning mock data.');
+    console.error('Last error:', lastError?.message);
+    return this.getMockTweets();
   }
 
   /**
