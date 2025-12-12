@@ -134,28 +134,57 @@ class NewsService {
       const link = $(el).find('span.tweet-date > a').attr('href');
       const fullLink = link ? `https://x.com${link}` : null;
 
+      // Extract avatar from tweet header
+      // Nitter structure: .tweet-header > .tweet-avatar > img or .avatar
+      let avatarUrl = null;
+      const avatarImg = $(el).find('.tweet-avatar img, .avatar').first();
+      if (avatarImg.length > 0) {
+        const avatarSrc = avatarImg.attr('src');
+        if (avatarSrc) {
+          avatarUrl = avatarSrc.startsWith('http') 
+            ? avatarSrc 
+            : `${nitterUrl}${avatarSrc}`;
+        }
+      }
+
       // Extract images from the tweet
+      // Structure: <a class="still-image" href="/pic/orig/..."> <img src="/pic/media/...?name=small"> </a>
+      // We use img src for display (thumbnail) and href for link (full-size image)
       const images = [];
+      const imageLinks = []; // Links to full-size images
       
       // Method 1: Look for images in attachments (most reliable for Nitter)
       // Nitter structure: .attachments > .gallery-row > .attachment.image > a.still-image > img
-      // Priority: Use href from <a.still-image> (original/higher quality) instead of img src (thumbnail)
-      $(el).find('.attachments .attachment.image a.still-image').each((_, link) => {
-        const href = $(link).attr('href');
-        if (href && href.includes('/pic/')) {
-          const imageUrl = href.startsWith('http') 
-            ? href 
-            : `${nitterUrl}${href}`;
-          if (!images.includes(imageUrl)) {
-            images.push(imageUrl);
+      $(el).find('.attachments .attachment.image').each((_, attachment) => {
+        const link = $(attachment).find('a.still-image');
+        const img = $(attachment).find('img');
+        
+        // Get thumbnail src from img tag (for display)
+        const imgSrc = img.attr('src');
+        if (imgSrc && imgSrc.includes('/pic/')) {
+          const thumbnailUrl = imgSrc.startsWith('http') 
+            ? imgSrc 
+            : `${nitterUrl}${imgSrc}`;
+          if (!images.includes(thumbnailUrl)) {
+            images.push(thumbnailUrl);
+          }
+        }
+        
+        // Get full-size link from a tag href (for clicking)
+        const linkHref = link.attr('href');
+        if (linkHref && linkHref.includes('/pic/')) {
+          const fullSizeUrl = linkHref.startsWith('http') 
+            ? linkHref 
+            : `${nitterUrl}${linkHref}`;
+          if (!imageLinks.includes(fullSizeUrl)) {
+            imageLinks.push(fullSizeUrl);
           }
         }
       });
 
-      // Method 2: Fallback - if no still-image link found, use img src
-      // This handles cases where the structure might be different
+      // Method 2: Fallback - if no attachment structure found, use img src directly
       if (images.length === 0) {
-        $(el).find('.attachments .attachment.image img').each((_, img) => {
+        $(el).find('.attachments img').each((_, img) => {
           const src = $(img).attr('src');
           if (src && 
               src.includes('/pic/') &&
@@ -194,7 +223,9 @@ class NewsService {
           text: text,
           time: time,
           link: fullLink,
-          images: images
+          avatar: avatarUrl || undefined, // Avatar URL
+          images: images,
+          imageLinks: imageLinks.length > 0 ? imageLinks : undefined // Full-size image links
         });
       }
     });
@@ -387,8 +418,10 @@ class NewsService {
                 id: `shams_${Date.now()}_${index}`,
                 author: 'Shams Charania',
                 authorHandle: '@ShamsCharania',
+                avatar: tweet.avatar, // Avatar URL
                 text: tweet.text,
                 images: tweet.images || [],
+                imageLinks: tweet.imageLinks || [], // Full-size image links
                 link: tweet.link,
                 timestamp: timestamp
               };
