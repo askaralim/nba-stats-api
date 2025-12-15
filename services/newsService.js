@@ -235,14 +235,24 @@ class NewsService {
 
   /**
    * Get tweets from Shams Charania's Twitter/X account using Nitter
+   * @param {boolean} forceRefresh - If true, bypass cache and fetch fresh data
    * @returns {Promise<Array>} Array of tweet objects
    */
-  async getShamsTweets() {
+  async getShamsTweets(forceRefresh = false) {
     const cacheKey = 'shams_tweets';
     const cached = this.cache.get(cacheKey);
     
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+    // Return cached data if available and not forcing refresh
+    if (!forceRefresh && cached && Date.now() - cached.timestamp < this.cacheTimeout) {
       console.log('Returning cached tweets');
+      return cached.data;
+    }
+
+    // If cache expired but we have data, return stale data while fetching in background
+    if (!forceRefresh && cached) {
+      console.log('Cache expired, returning stale data while fetching fresh data in background');
+      // Trigger background refresh without blocking
+      this.refreshTweetsInBackground();
       return cached.data;
     }
 
@@ -260,6 +270,26 @@ class NewsService {
       return result;
     } finally {
       // Clear the promise when done
+      this.fetchingPromise = null;
+    }
+  }
+
+  /**
+   * Refresh tweets in background without blocking
+   * @private
+   */
+  async refreshTweetsInBackground() {
+    // Only refresh if not already fetching
+    if (this.fetchingPromise) {
+      return;
+    }
+
+    try {
+      this.fetchingPromise = this._fetchShamsTweets();
+      await this.fetchingPromise;
+    } catch (error) {
+      console.error('Background tweet refresh failed:', error);
+    } finally {
       this.fetchingPromise = null;
     }
   }
