@@ -33,11 +33,205 @@ class GameTransformer {
   }
 
   /**
+   * Minimize game data for GamesToday page (only what's needed for GameCard)
+   * @param {Object} game - Full game object
+   * @returns {Object} Minimized game data
+   */
+  minimizeGameForList(game) {
+    if (!game) return null;
+
+    return {
+      gameId: game.gameId,
+      gameStatus: game.gameStatus,
+      gameStatusText: game.gameStatusText,
+      gameEt: game.gameEt,
+      period: game.period,
+      awayTeam: {
+        teamName: game.awayTeam?.teamName,
+        teamCity: game.awayTeam?.teamCity,
+        abbreviation: game.awayTeam?.teamTricode,
+        logo: game.awayTeam?.logo,
+        wins: game.awayTeam?.wins,
+        losses: game.awayTeam?.losses,
+        score: game.awayTeam?.score
+      },
+      homeTeam: {
+        teamName: game.homeTeam?.teamName,
+        teamCity: game.homeTeam?.teamCity,
+        abbreviation: game.homeTeam?.teamTricode,
+        logo: game.homeTeam?.logo,
+        wins: game.homeTeam?.wins,
+        losses: game.homeTeam?.losses,
+        score: game.homeTeam?.score
+      }
+    };
+  }
+
+  /**
+   * Check if game is a marquee matchup
+   * @param {Object} game - Game object
+   * @returns {boolean} True if marquee matchup
+   */
+  isMarqueeMatchup(game) {
+    if (!game?.awayTeam?.abbreviation || !game?.homeTeam?.abbreviation) return false;
+    
+    // Manually configured marquee matchups
+    const marqueeMatchups = [
+      ['GSW', 'LAL'], ['LAL', 'GSW'],
+      ['BOS', 'LAL'], ['LAL', 'BOS'],
+      ['MIA', 'LAL'], ['LAL', 'MIA'],
+      ['BOS', 'MIA'], ['MIA', 'BOS'],
+      ['GSW', 'BOS'], ['BOS', 'GSW'],
+      ['PHX', 'LAL'], ['LAL', 'PHX'],
+      ['MIL', 'BOS'], ['BOS', 'MIL'],
+      ['DEN', 'LAL'], ['LAL', 'DEN']
+    ];
+    
+    const matchup = [game.awayTeam.abbreviation, game.homeTeam.abbreviation];
+    return marqueeMatchups.some(m => 
+      m[0] === matchup[0] && m[1] === matchup[1]
+    );
+  }
+
+  /**
+   * Check if game went to overtime
+   * @param {Object} game - Game object
+   * @returns {boolean} True if OT game
+   */
+  isOvertimeGame(game) {
+    // Check if period > 4 (OT games)
+    return game?.period > 4 || 
+           (game?.gameStatusText && game.gameStatusText.toLowerCase().includes('ot')) ||
+           (game?.gameStatusText && game.gameStatusText.toLowerCase().includes('overtime'));
+  }
+
+  /**
+   * Calculate score difference for completed games
+   * @param {Object} game - Game object
+   * @returns {number|null} Score difference or null if not completed
+   */
+  getScoreDifference(game) {
+    if (game?.gameStatus !== 3) return null; // Only for completed games
+    if (game?.awayTeam?.score === null || game?.homeTeam?.score === null) return null;
+    
+    return Math.abs(game.awayTeam.score - game.homeTeam.score);
+  }
+
+  /**
+   * Identify featured games (best game, OT games, marquee matchups)
+   * @param {Array} games - Array of game objects
+   * @returns {Object} { featured: [], other: [] }
+   */
+  identifyFeaturedGames(games) {
+    if (!games || games.length === 0) {
+      return { featured: [], other: [] };
+    }
+
+    const featured = [];
+    const other = [];
+    
+    // Find best game (closest score for completed games, or marquee/live games)
+    const completedGames = games.filter(g => g.gameStatus === 3);
+    const liveGames = games.filter(g => g.gameStatus === 2);
+    const scheduledGames = games.filter(g => g.gameStatus === 1);
+    
+    // Priority 1: OT games (completed)
+    const otGames = completedGames.filter(g => this.isOvertimeGame(g));
+    otGames.forEach(game => {
+      if (!featured.find(f => f.gameId === game.gameId)) {
+        featured.push({ ...game, featuredReason: 'overtime' });
+      }
+    });
+    
+    // Priority 2: Marquee matchups (any status)
+    const marqueeGames = games.filter(g => this.isMarqueeMatchup(g));
+    marqueeGames.forEach(game => {
+      if (!featured.find(f => f.gameId === game.gameId)) {
+        featured.push({ ...game, featuredReason: 'marquee' });
+      }
+    });
+    
+    // Priority 3: Best game (closest score, completed games only)
+    if (completedGames.length > 0) {
+      const gamesWithScores = completedGames
+        .map(game => ({
+          game,
+          scoreDiff: this.getScoreDifference(game)
+        }))
+        .filter(item => item.scoreDiff !== null)
+        .sort((a, b) => a.scoreDiff - b.scoreDiff);
+      
+      if (gamesWithScores.length > 0) {
+        const bestGame = gamesWithScores[0].game;
+        if (!featured.find(f => f.gameId === bestGame.gameId) && bestGame.gameStatus === 3) {
+          featured.push({ ...bestGame, featuredReason: 'closest' });
+        }
+      }
+    }
+    
+    // Priority 4: Live games (if not already featured)
+    liveGames.forEach(game => {
+      if (!featured.find(f => f.gameId === game.gameId)) {
+        featured.push({ ...game, featuredReason: 'live' });
+      }
+    });
+    
+    // All other games go to "other"
+    games.forEach(game => {
+      if (!featured.find(f => f.gameId === game.gameId)) {
+        other.push(game);
+      }
+    });
+    
+    return {
+      featured: featured.slice(0, 3), // Max 3 featured games
+      other: other.slice(0, 4) // Show 4 other games
+    };
+  }
+
+  /**
+   * Pre-calculate top performers for a team
+   * @param {Array} players - Array of player objects
+   * @param {number} limit - Number of top performers per category
+   * @param {Object} teamInfo - Optional team info to include in performers (teamName, teamLogo, teamAbbreviation)
+   * @returns {Object} Top performers by category
+   */
+  getTopPerformers(players, limit = 3, teamInfo = null) {
+    const categories = ['points', 'rebounds', 'assists', 'plusMinus', 'steals', 'blocks'];
+    const topPerformers = {};
+
+    categories.forEach(category => {
+      topPerformers[category] = [...players]
+        .filter(player => {
+          const value = player.stats?.[category];
+          return value !== null && value !== undefined && value !== '-' && !isNaN(parseFloat(value));
+        })
+        .sort((a, b) => {
+          const aVal = parseFloat(a.stats[category]) || (category === 'plusMinus' ? -Infinity : 0);
+          const bVal = parseFloat(b.stats[category]) || (category === 'plusMinus' ? -Infinity : 0);
+          return bVal - aVal;
+        })
+        .slice(0, limit)
+        .map(player => ({
+          ...player,
+          ...(teamInfo && {
+            teamName: teamInfo.teamName,
+            teamLogo: teamInfo.teamLogo,
+            teamAbbreviation: teamInfo.teamAbbreviation
+          })
+        }));
+    });
+
+    return topPerformers;
+  }
+
+  /**
    * Transform scoreboard data to simplified format
    * @param {Object} scoreboardData - Raw ESPN API scoreboard response
+   * @param {boolean} minimize - If true, return minimized data for GamesToday
    * @returns {Object} Transformed data
    */
-  transformScoreboard(scoreboardData) {
+  transformScoreboard(scoreboardData, minimize = false) {
     if (!scoreboardData?.events) {
       return {
         date: new Date().toISOString().split('T')[0],
@@ -47,11 +241,12 @@ class GameTransformer {
     }
 
     const date = scoreboardData.day?.date || new Date().toISOString().split('T')[0];
+    const games = (scoreboardData.events || []).map(event => this.transformGame(event));
 
     return {
       date,
-      totalGames: scoreboardData.events?.length || 0,
-      games: (scoreboardData.events || []).map(event => this.transformGame(event))
+      totalGames: games.length,
+      games: minimize ? games.map(game => this.minimizeGameForList(game)).filter(Boolean) : games
     };
   }
 
@@ -313,8 +508,22 @@ class GameTransformer {
       };
     });
 
+    // Pre-calculate top performers for each team (with team info included)
+    const teamsWithTopPerformers = transformedTeams.map(team => {
+      const allTeamPlayers = [...(team.starters || []), ...(team.bench || [])];
+      const teamInfo = {
+        teamName: team.teamName,
+        teamLogo: team.teamLogo,
+        teamAbbreviation: team.teamAbbreviation
+      };
+      return {
+        ...team,
+        topPerformers: this.getTopPerformers(allTeamPlayers, 3, teamInfo)
+      };
+    });
+
     return {
-      teams: transformedTeams
+      teams: teamsWithTopPerformers
     };
   }
 }

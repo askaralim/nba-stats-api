@@ -22,6 +22,26 @@ class StandingsService {
   }
 
   /**
+   * Format win percentage as string (e.g., "80.8%")
+   * @param {number|null} percent - Win percentage (0-1)
+   * @returns {string} Formatted percentage or '-'
+   */
+  formatWinPercent(percent) {
+    if (percent === null || percent === undefined) return '-';
+    return `${(percent * 100).toFixed(1)}%`;
+  }
+
+  /**
+   * Format games behind as string
+   * @param {number|null} gamesBehind - Games behind
+   * @returns {string} Formatted games behind or '-'
+   */
+  formatGamesBehind(gamesBehind) {
+    if (gamesBehind === null || gamesBehind === undefined || gamesBehind === 0) return '-';
+    return gamesBehind.toFixed(1);
+  }
+
+  /**
    * Transform team entry to our format
    * @param {Object} entry - ESPN API entry object
    * @returns {Object} Transformed team data
@@ -29,6 +49,12 @@ class StandingsService {
   transformTeamEntry(entry) {
     const team = entry.team;
     const stats = entry.stats || [];
+
+    const wins = this.getStatValue(stats, 'wins');
+    const losses = this.getStatValue(stats, 'losses');
+    const winPercent = this.getStatValue(stats, 'winPercent');
+    const gamesBehind = this.getStatValue(stats, 'gamesBehind');
+    const streakType = stats.find(s => s.name === 'streak')?.displayValue || null;
 
     return {
       id: team.id,
@@ -38,17 +64,19 @@ class StandingsService {
       abbreviation: team.abbreviation,
       location: team.location,
       logo: team.logos?.[0]?.href || null,
-      wins: this.getStatValue(stats, 'wins'),
-      losses: this.getStatValue(stats, 'losses'),
-      winPercent: this.getStatValue(stats, 'winPercent'),
+      wins: wins,
+      losses: losses,
+      winPercent: winPercent, // Keep raw value for sorting/filtering
+      winPercentDisplay: this.formatWinPercent(winPercent), // Formatted for display
       playoffSeed: this.getStatValue(stats, 'playoffSeed'),
-      gamesBehind: this.getStatValue(stats, 'gamesBehind'),
+      gamesBehind: gamesBehind, // Keep raw value
+      gamesBehindDisplay: this.formatGamesBehind(gamesBehind), // Formatted for display
       homeWins: this.getStatValue(stats, 'homeWins'),
       homeLosses: this.getStatValue(stats, 'homeLosses'),
       awayWins: this.getStatValue(stats, 'awayWins'),
       awayLosses: this.getStatValue(stats, 'awayLosses'),
       streak: this.getStatValue(stats, 'streak'),
-      streakType: stats.find(s => s.name === 'streak')?.displayValue || null
+      streakType: streakType
     };
   }
 
@@ -100,12 +128,18 @@ class StandingsService {
 
       // Transform the response
       const conferences = {};
+      let seasonDisplayName = null;
       
       (data.children || []).forEach(conference => {
         if (!conference.isConference) return;
 
         const conferenceName = conference.abbreviation || conference.name;
         const entries = conference.standings?.entries || [];
+        
+        // Get seasonDisplayName from first conference (they should all be the same)
+        if (!seasonDisplayName && conference.standings?.seasonDisplayName) {
+          seasonDisplayName = conference.standings.seasonDisplayName;
+        }
 
         conferences[conferenceName] = {
           id: conference.id,
@@ -118,9 +152,15 @@ class StandingsService {
         };
       });
 
+      // Use first conference's seasonDisplayName or generate one
+      if (!seasonDisplayName) {
+        seasonDisplayName = `${season - 1}-${season}`;
+      }
+
       const transformedData = {
         season: season,
         seasonType: seasonType,
+        seasonDisplayName: seasonDisplayName,
         conferences: conferences
       };
 
