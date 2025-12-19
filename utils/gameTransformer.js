@@ -14,9 +14,12 @@ class GameTransformer {
       'STATUS_SCHEDULED': 1,
       'STATUS_IN_PROGRESS': 2,
       'STATUS_FINAL': 3,
+      'STATUS_FINAL_OVERTIME': 3,
       'STATUS_DELAYED': 1,
       'STATUS_POSTPONED': 1,
-      'STATUS_SUSPENDED': 2
+      'STATUS_SUSPENDED': 2,
+      'STATUS_HALFTIME': 2,
+      'STATUS_END_PERIOD': 2
     };
     return statusMap[espnStatus] || 1;
   }
@@ -267,11 +270,34 @@ class GameTransformer {
     const homeCompetitor = competition.competitors?.find(c => c.homeAway === 'home');
     const awayCompetitor = competition.competitors?.find(c => c.homeAway === 'away');
 
+    // Get scores to infer status if needed
+    const homeScore = homeCompetitor?.score ? parseInt(homeCompetitor.score, 10) : null;
+    const awayScore = awayCompetitor?.score ? parseInt(awayCompetitor.score, 10) : null;
+    const hasScores = homeScore !== null && awayScore !== null;
+    const isCompleted = statusType.completed === true || status.completed === true;
+
+    // Determine game status - infer from scores if status mapping is unclear
+    let gameStatus = this.mapStatus(statusType.name);
+    
+    // If game has scores, it cannot be "Scheduled"
+    if (hasScores && gameStatus === 1) {
+      // If completed flag is set, it's Final; otherwise it's Live
+      gameStatus = isCompleted ? 3 : 2;
+    }
+    
+    // If status is mapped but doesn't match reality, correct it
+    if (hasScores && !isCompleted && gameStatus === 3) {
+      gameStatus = 2; // Has scores but not completed = Live
+    }
+    if (hasScores && isCompleted && gameStatus === 2) {
+      gameStatus = 3; // Has scores and completed = Final
+    }
+
     return {
       gameId: event.id,
       gameCode: event.shortName || '',
       gameStatusText: statusType.description || statusType.shortDetail || 'Scheduled',
-      gameStatus: this.mapStatus(statusType.name),
+      gameStatus: gameStatus,
       period: status.period || 0,
       gameClock: status.displayClock || '',
       gameTimeGMT: event.date ? this.formatGameTime(event.date) : null,
