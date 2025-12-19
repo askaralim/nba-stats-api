@@ -78,19 +78,25 @@ class GameTransformer {
   isMarqueeMatchup(game) {
     if (!game?.awayTeam?.abbreviation || !game?.homeTeam?.abbreviation) return false;
     
-    // Manually configured marquee matchups
+    const awayAbbr = game.awayTeam.abbreviation.toUpperCase();
+    const homeAbbr = game.homeTeam.abbreviation.toUpperCase();
+    
+    // Any game involving GSW is a marquee matchup
+    if (awayAbbr === 'GS' || homeAbbr === 'GS') {
+      return true;
+    }
+    
+    // Additional manually configured marquee matchups
     const marqueeMatchups = [
-      ['GSW', 'LAL'], ['LAL', 'GSW'],
       ['BOS', 'LAL'], ['LAL', 'BOS'],
       ['MIA', 'LAL'], ['LAL', 'MIA'],
       ['BOS', 'MIA'], ['MIA', 'BOS'],
-      ['GSW', 'BOS'], ['BOS', 'GSW'],
       ['PHX', 'LAL'], ['LAL', 'PHX'],
       ['MIL', 'BOS'], ['BOS', 'MIL'],
       ['DEN', 'LAL'], ['LAL', 'DEN']
     ];
     
-    const matchup = [game.awayTeam.abbreviation, game.homeTeam.abbreviation];
+    const matchup = [awayAbbr, homeAbbr];
     return marqueeMatchups.some(m => 
       m[0] === matchup[0] && m[1] === matchup[1]
     );
@@ -132,25 +138,25 @@ class GameTransformer {
 
     const featured = [];
     const other = [];
-    
+
     // Find best game (closest score for completed games, or marquee/live games)
     const completedGames = games.filter(g => g.gameStatus === 3);
     const liveGames = games.filter(g => g.gameStatus === 2);
     const scheduledGames = games.filter(g => g.gameStatus === 1);
-    
-    // Priority 1: OT games (completed)
-    const otGames = completedGames.filter(g => this.isOvertimeGame(g));
-    otGames.forEach(game => {
-      if (!featured.find(f => f.gameId === game.gameId)) {
-        featured.push({ ...game, featuredReason: 'overtime' });
-      }
-    });
-    
-    // Priority 2: Marquee matchups (any status)
+
+    // Priority 1: Marquee matchups (any status)
     const marqueeGames = games.filter(g => this.isMarqueeMatchup(g));
     marqueeGames.forEach(game => {
       if (!featured.find(f => f.gameId === game.gameId)) {
         featured.push({ ...game, featuredReason: 'marquee' });
+      }
+    });
+
+    // Priority 2: OT games (completed)
+    const otGames = completedGames.filter(g => this.isOvertimeGame(g));
+    otGames.forEach(game => {
+      if (!featured.find(f => f.gameId === game.gameId)) {
+        featured.push({ ...game, featuredReason: 'overtime' });
       }
     });
     
