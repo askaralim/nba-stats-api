@@ -115,86 +115,148 @@ class GameTransformer {
   }
 
   /**
-   * Calculate score difference for completed games
+   * Calculate score difference for games with scores
    * @param {Object} game - Game object
-   * @returns {number|null} Score difference or null if not completed
+   * @returns {number|null} Score difference or null if scores not available
    */
   getScoreDifference(game) {
-    if (game?.gameStatus !== 3) return null; // Only for completed games
+    // Works for both live (status 2) and completed (status 3) games
     if (game?.awayTeam?.score === null || game?.homeTeam?.score === null) return null;
     
     return Math.abs(game.awayTeam.score - game.homeTeam.score);
   }
 
   /**
-   * Identify featured games (best game, OT games, marquee matchups)
+   * Check if game is closest (score difference <= 5)
+   * Works for both live and finished games
+   * @param {Object} game - Game object
+   * @returns {boolean} True if closest game
+   */
+  isClosestGame(game) {
+    const scoreDiff = this.getScoreDifference(game);
+    return scoreDiff !== null && scoreDiff <= 5;
+  }
+
+  /**
+   * Get game priority for sorting
+   * Lower number = higher priority
+   * @param {Object} game - Game object
+   * @returns {number} Priority value
+   */
+  getGamePriority(game) {
+    const isLive = game.gameStatus === 2;
+    const isMarquee = this.isMarqueeMatchup(game);
+    const isOT = this.isOvertimeGame(game);
+    const isClosest = this.isClosestGame(game);
+    const isScheduled = game.gameStatus === 1;
+    const isFinished = game.gameStatus === 3;
+
+    // Priority 1: Live marquee games
+    if (isLive && isMarquee) return 1;
+    
+    // Priority 2: Live closest games
+    if (isLive && isClosest) return 2;
+    
+    // Priority 3: Live OT games
+    if (isLive && isOT) return 3;
+    
+    // Priority 4: Live games (other)
+    if (isLive) return 4;
+    
+    // Priority 5: Closest games (even if finished)
+    if (isClosest) return 5;
+    
+    // Priority 6: OT games (even if finished)
+    if (isOT) return 6;
+    
+    // Priority 7: Scheduled games
+    if (isScheduled) return 7;
+    
+    // Priority 8: Regular finished games
+    if (isFinished) return 8;
+    
+    // Default (shouldn't happen)
+    return 9;
+  }
+
+  /**
+   * Sort games by priority
    * @param {Array} games - Array of game objects
-   * @returns {Object} { featured: [], other: [] }
+   * @returns {Array} Sorted games array
+   */
+  sortGamesByPriority(games) {
+    if (!games || games.length === 0) {
+      return [];
+    }
+
+    return [...games].sort((a, b) => {
+      const priorityA = this.getGamePriority(a);
+      const priorityB = this.getGamePriority(b);
+      
+      // Sort by priority first
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      
+      // If same priority and both are closest games, sort by score difference
+      const scoreDiffA = this.getScoreDifference(a);
+      const scoreDiffB = this.getScoreDifference(b);
+      if (scoreDiffA !== null && scoreDiffB !== null) {
+        return scoreDiffA - scoreDiffB;
+      }
+      
+      // Maintain original order for same priority
+      return 0;
+    });
+  }
+
+  /**
+   * Identify featured games and sort all games by priority
+   * @param {Array} games - Array of game objects
+   * @returns {Object} { featured: [], other: [], games: [] } - All games sorted by priority
    */
   identifyFeaturedGames(games) {
     if (!games || games.length === 0) {
-      return { featured: [], other: [] };
+      return { featured: [], other: [], games: [] };
     }
+
+    // Sort all games by priority
+    const sortedGames = this.sortGamesByPriority(games);
 
     const featured = [];
     const other = [];
 
-    // Find best game (closest score for completed games, or marquee/live games)
-    const completedGames = games.filter(g => g.gameStatus === 3);
-    const liveGames = games.filter(g => g.gameStatus === 2);
-    const scheduledGames = games.filter(g => g.gameStatus === 1);
+    // Categorize games into featured and other
+    sortedGames.forEach(game => {
+      const isLive = game.gameStatus === 2;
+      const isMarquee = this.isMarqueeMatchup(game);
+      const isOT = this.isOvertimeGame(game);
+      const isClosest = this.isClosestGame(game);
 
-    // Priority 1: Marquee matchups (any status)
-    const marqueeGames = games.filter(g => this.isMarqueeMatchup(g));
-    marqueeGames.forEach(game => {
-      if (!featured.find(f => f.gameId === game.gameId)) {
-        featured.push({ ...game, featuredReason: 'marquee' });
-      }
-    });
+      // Featured games: live marquee, live closest, live OT, closest, OT
+      if ((isLive && isMarquee) || 
+          (isLive && isClosest) || 
+          (isLive && isOT) || 
+          isClosest || 
+          isOT) {
+        // Determine featured reason
+        let featuredReason = 'live';
+        if (isLive && isMarquee) featuredReason = 'marquee';
+        else if (isLive && isClosest) featuredReason = 'closest';
+        else if (isLive && isOT) featuredReason = 'overtime';
+        else if (isClosest) featuredReason = 'closest';
+        else if (isOT) featuredReason = 'overtime';
 
-    // Priority 2: OT games (completed)
-    const otGames = completedGames.filter(g => this.isOvertimeGame(g));
-    otGames.forEach(game => {
-      if (!featured.find(f => f.gameId === game.gameId)) {
-        featured.push({ ...game, featuredReason: 'overtime' });
-      }
-    });
-    
-    // Priority 3: Best game (closest score, completed games only)
-    if (completedGames.length > 0) {
-      const gamesWithScores = completedGames
-        .map(game => ({
-          game,
-          scoreDiff: this.getScoreDifference(game)
-        }))
-        .filter(item => item.scoreDiff !== null)
-        .sort((a, b) => a.scoreDiff - b.scoreDiff);
-      
-      if (gamesWithScores.length > 0) {
-        const bestGame = gamesWithScores[0].game;
-        if (!featured.find(f => f.gameId === bestGame.gameId) && bestGame.gameStatus === 3) {
-          featured.push({ ...bestGame, featuredReason: 'closest' });
-        }
-      }
-    }
-    
-    // Priority 4: Live games (if not already featured)
-    liveGames.forEach(game => {
-      if (!featured.find(f => f.gameId === game.gameId)) {
-        featured.push({ ...game, featuredReason: 'live' });
-      }
-    });
-    
-    // All other games go to "other"
-    games.forEach(game => {
-      if (!featured.find(f => f.gameId === game.gameId)) {
+        featured.push({ ...game, featuredReason });
+      } else {
         other.push(game);
       }
     });
     
     return {
       featured: featured.slice(0, 3), // Max 3 featured games
-      other: other.slice(0, 4) // Show 4 other games
+      other: other.slice(0, 4), // Show 4 other games
+      games: sortedGames // All games sorted by priority
     };
   }
 

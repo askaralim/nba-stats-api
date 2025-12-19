@@ -148,18 +148,24 @@ class WebServer {
         // Minimize data for GamesToday page - only return what's needed
         const transformed = gameTransformer.transformScoreboard(scoreboardData, true);
         
-        // If featured=true, identify featured games
+        // If featured=true, identify featured games and sort by priority
         if (featured === 'true') {
-          const { featured: featuredGames, other: otherGames } = 
+          const { featured: featuredGames, other: otherGames, games: sortedGames } = 
             gameTransformer.identifyFeaturedGames(transformed.games);
           
           res.json({
             ...transformed,
+            games: sortedGames, // All games sorted by priority
             featured: featuredGames,
             other: otherGames
           });
         } else {
-          res.json(transformed);
+          // Even without featured=true, sort games by priority
+          const sortedGames = gameTransformer.sortGamesByPriority(transformed.games);
+          res.json({
+            ...transformed,
+            games: sortedGames
+          });
         }
       } catch (error) {
         console.error('Error fetching games:', error);
