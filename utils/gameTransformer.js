@@ -339,29 +339,44 @@ class GameTransformer {
     const awayCompetitor = competition.competitors?.find(c => c.homeAway === 'away');
 
     // Get scores to infer status if needed
-    const homeScore = homeCompetitor?.score ? parseInt(homeCompetitor.score, 10) : null;
-    const awayScore = awayCompetitor?.score ? parseInt(awayCompetitor.score, 10) : null;
-    const hasScores = homeScore !== null && awayScore !== null;
+    const homeScore = homeCompetitor?.score !== undefined && homeCompetitor?.score !== null 
+      ? parseInt(homeCompetitor.score, 10) 
+      : null;
+    const awayScore = awayCompetitor?.score !== undefined && awayCompetitor?.score !== null 
+      ? parseInt(awayCompetitor.score, 10) 
+      : null;
+    
+    // Only consider it has scores if both scores exist AND at least one is > 0
+    // 0-0 scores are likely default values for scheduled games, not actual game scores
+    const hasActualScores = homeScore !== null && awayScore !== null && (homeScore > 0 || awayScore > 0);
     const isCompleted = statusType.completed === true || status.completed === true;
 
     // Determine game status - infer from scores if status mapping is unclear
     let gameStatus = this.mapStatus(statusType.name);
     
-    // If game has scores, it cannot be "Scheduled"
-    if (hasScores && gameStatus === 1) {
+    // If game has actual scores (not 0-0), it cannot be "Scheduled"
+    // Only override status if we have real scores (at least one team has scored)
+    if (hasActualScores && gameStatus === 1) {
       // If completed flag is set, it's Final; otherwise it's Live
       gameStatus = isCompleted ? 3 : 2;
     }
     
     // If status is mapped but doesn't match reality, correct it
-    if (hasScores && !isCompleted && gameStatus === 3) {
+    if (hasActualScores && !isCompleted && gameStatus === 3) {
       gameStatus = 2; // Has scores but not completed = Live
     }
-    if (hasScores && isCompleted && gameStatus === 2) {
+    if (hasActualScores && isCompleted && gameStatus === 2) {
       gameStatus = 3; // Has scores and completed = Final
     }
+    
+    // Special case: If scores are 0-0, trust the ESPN status
+    // Don't mark 0-0 games as live just because scores exist (they might be default values)
+    if (homeScore === 0 && awayScore === 0) {
+      // Trust ESPN's status for 0-0 games - don't override
+      gameStatus = this.mapStatus(statusType.name);
+    }
 
-    return {
+    const transformedGame = {
       gameId: event.id,
       gameCode: event.shortName || '',
       gameStatusText: statusType.description || statusType.shortDetail || 'Scheduled',
@@ -374,6 +389,140 @@ class GameTransformer {
       awayTeam: this.transformTeam(awayCompetitor),
       gameLeaders: this.extractGameLeaders(competition.competitors)
     };
+
+    // Calculate competitiveness for finished games
+    const competitiveness = this.calculateCompetitiveness(transformedGame);
+    if (competitiveness) {
+      transformedGame.competitiveness = competitiveness;
+    }
+
+    // Calculate max lead from period scores
+    const maxLead = this.calculateMaxLead(transformedGame);
+    if (maxLead) {
+      transformedGame.maxLead = maxLead;
+    }
+
+    return transformedGame;
+  }
+
+  /**
+   * Calculate maximum lead during the game from period-by-period scores
+   * @param {Object} game - Game object with teams and periods
+   * @returns {Object|null} Max lead data { team: 'home'|'away', points: number, period: number }
+   */
+  calculateMaxLead(game) {
+    const awayPeriods = game.awayTeam?.periods || [];
+    const homePeriods = game.homeTeam?.periods || [];
+
+    // Need period data to calculate max lead
+    if (awayPeriods.length === 0 || homePeriods.length === 0) {
+      return null;
+    }
+
+    let maxLead = 0;
+    let maxLeadTeam = null;
+    let maxLeadPeriod = 0;
+    let awayCumulative = 0;
+    let homeCumulative = 0;
+
+    // Find the maximum number of periods
+    const maxPeriods = Math.max(awayPeriods.length, homePeriods.length);
+
+    // Calculate cumulative scores after each period
+    for (let i = 0; i < maxPeriods; i++) {
+      const awayPeriod = awayPeriods[i];
+      const homePeriod = homePeriods[i];
+
+      if (awayPeriod && homePeriod) {
+        awayCumulative += parseInt(awayPeriod.score) || 0;
+        homeCumulative += parseInt(homePeriod.score) || 0;
+
+        const lead = Math.abs(awayCumulative - homeCumulative);
+        
+        if (lead > maxLead) {
+          maxLead = lead;
+          maxLeadTeam = awayCumulative > homeCumulative ? 'away' : 'home';
+          maxLeadPeriod = awayPeriod.period || homePeriod.period || i + 1;
+        }
+      }
+    }
+
+    if (maxLead === 0) {
+      return null;
+    }
+
+    return {
+      team: maxLeadTeam,
+      points: maxLead,
+      period: maxLeadPeriod,
+      teamName: maxLeadTeam === 'home' ? game.homeTeam?.teamName : game.awayTeam?.teamName,
+      teamAbbreviation: maxLeadTeam === 'home' ? game.homeTeam?.teamTricode : game.awayTeam?.teamTricode,
+      teamLogo: maxLeadTeam === 'home' ? game.homeTeam?.logo : game.awayTeam?.logo
+    };
+  }
+
+  /**
+   * Calculate game competitiveness classification
+   * @param {Object} game - Game object with teams and periods
+   * @returns {Object} Competitiveness classification { type, label, icon, finalMargin }
+   */
+  calculateCompetitiveness(game) {
+    // Only calculate for finished games
+    if (game.gameStatus !== 3) {
+      return null;
+    }
+
+    const awayScore = game.awayTeam?.score;
+    const homeScore = game.homeTeam?.score;
+
+    // Need scores to calculate
+    if (awayScore === null || homeScore === null) {
+      return null;
+    }
+
+    const finalMargin = Math.abs(awayScore - homeScore);
+    const isOT = this.isOvertimeGame(game);
+
+    // OT games are always "Classic"
+    if (isOT) {
+      return {
+        type: 'classic',
+        label: 'Classic',
+        icon: '🔥',
+        finalMargin: finalMargin
+      };
+    }
+
+    // Classify based on final margin
+    if (finalMargin <= 3) {
+      return {
+        type: 'classic',
+        label: 'Classic',
+        icon: '🔥',
+        finalMargin: finalMargin
+      };
+    } else if (finalMargin <= 7) {
+      return {
+        type: 'close',
+        label: 'Close',
+        icon: '⚡',
+        finalMargin: finalMargin
+      };
+    } else if (finalMargin <= 15) {
+      return {
+        type: 'comfortable',
+        label: 'Comfortable',
+        icon: null,
+        finalMargin: finalMargin
+      };
+    } else {
+      return {
+        type: 'blowout',
+        label: 'Blowout',
+        icon: null,
+        finalMargin: finalMargin
+      };
+    }
   }
 
   /**
@@ -616,9 +765,86 @@ class GameTransformer {
       };
     });
 
+    // Calculate Game MVP (Who carried?)
+    const gameMVP = this.calculateGameMVP(allPlayers, teams);
+
     return {
-      teams: teamsWithTopPerformers
+      teams: teamsWithTopPerformers,
+      gameMVP: gameMVP
     };
+  }
+
+  /**
+   * Calculate Game Impact Score (GIS) for a player
+   * GIS = PTS + 1.2 × REB + 1.5 × AST + 3 × STL + 3 × BLK - 1 × TOV
+   * @param {Object} player - Player object with stats
+   * @returns {number} Game Impact Score
+   */
+  calculateGIS(player) {
+    if (!player?.stats) return 0;
+    
+    const pts = parseInt(player.stats.points) || 0;
+    const reb = parseInt(player.stats.rebounds) || 0;
+    const ast = parseInt(player.stats.assists) || 0;
+    const stl = parseInt(player.stats.steals) || 0;
+    const blk = parseInt(player.stats.blocks) || 0;
+    const tov = parseInt(player.stats.turnovers) || 0;
+    
+    return pts + (1.2 * reb) + (1.5 * ast) + (3 * stl) + (3 * blk) - (1 * tov);
+  }
+
+  /**
+   * Calculate Game MVP (Who carried?) - player with highest GIS across both teams
+   * @param {Array} allPlayers - Array of all players from both teams
+   * @param {Array} teams - Array of team objects with team info
+   * @returns {Object|null} Game MVP object with player info and GIS
+   */
+  calculateGameMVP(allPlayers, teams = []) {
+    if (!allPlayers || allPlayers.length === 0) {
+      return null;
+    }
+
+    // Calculate GIS for all players and find the highest
+    let gameMVP = null;
+    let highestGIS = -Infinity;
+
+    allPlayers.forEach(player => {
+      // Skip players who didn't play
+      if (player.didNotPlay) return;
+      
+      const gis = this.calculateGIS(player);
+      
+      if (gis > highestGIS) {
+        highestGIS = gis;
+        
+        // Find team info for this player
+        const playerTeam = teams.find(t => String(t.teamId) === String(player.teamId));
+        
+        gameMVP = {
+          athleteId: player.athleteId,
+          name: player.name,
+          shortName: player.shortName,
+          jersey: player.jersey,
+          position: player.position,
+          headshot: player.headshot,
+          teamId: player.teamId,
+          teamAbbreviation: player.teamAbbreviation,
+          teamName: playerTeam?.teamName || '',
+          teamLogo: playerTeam?.teamLogo || '',
+          gis: Math.round(gis * 10) / 10, // Round to 1 decimal place
+          stats: {
+            points: player.stats.points || 0,
+            rebounds: player.stats.rebounds || 0,
+            assists: player.stats.assists || 0,
+            steals: player.stats.steals || 0,
+            blocks: player.stats.blocks || 0,
+            turnovers: player.stats.turnovers || 0
+          }
+        };
+      }
+    });
+
+    return gameMVP;
   }
 }
 
