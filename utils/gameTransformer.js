@@ -120,19 +120,27 @@ class GameTransformer {
    * @returns {number|null} Score difference or null if scores not available
    */
   getScoreDifference(game) {
+    // Don't calculate for scheduled games
+    if (game.gameStatus === 1) return null;
     // Works for both live (status 2) and completed (status 3) games
     if (game?.awayTeam?.score === null || game?.homeTeam?.score === null) return null;
+    // Don't consider 0-0 as a valid score difference (scheduled games with default scores)
+    if (game.awayTeam.score === 0 && game.homeTeam.score === 0) return null;
     
     return Math.abs(game.awayTeam.score - game.homeTeam.score);
   }
 
   /**
    * Check if game is closest (score difference <= 5)
-   * Works for both live and finished games
+   * Only works for live or finished games, not scheduled games
    * @param {Object} game - Game object
    * @returns {boolean} True if closest game
    */
   isClosestGame(game) {
+    // Only consider live or finished games, not scheduled games
+    if (game.gameStatus === 1) {
+      return false;
+    }
     const scoreDiff = this.getScoreDifference(game);
     return scoreDiff !== null && scoreDiff <= 5;
   }
