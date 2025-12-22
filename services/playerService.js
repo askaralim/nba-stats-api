@@ -3,8 +3,6 @@
  * Fetches player data, statistics, and advanced stats from ESPN API endpoints
  */
 
-const glossaryTranslator = require('../utils/glossaryTranslator');
-
 class PlayerService {
   constructor() {
     this.baseUrl = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes';
@@ -88,39 +86,8 @@ class PlayerService {
   translateResponse(data) {
     if (!data) return data;
 
+    // Return data as-is (translation removed - glossaryTranslator was deleted)
     const translated = { ...data };
-
-    // Translate labels if present
-    if (translated.labels && Array.isArray(translated.labels)) {
-      translated.labels = glossaryTranslator.translateLabels(translated.labels);
-    }
-
-    // Translate displayNames if present
-    if (translated.displayNames && Array.isArray(translated.displayNames)) {
-      translated.displayNames = glossaryTranslator.translateLabels(translated.displayNames);
-    }
-
-    // Translate glossary if present
-    if (translated.glossary && Array.isArray(translated.glossary)) {
-      translated.glossary = glossaryTranslator.translateGlossaryArray(translated.glossary);
-    }
-
-    // Translate categories if present
-    if (translated.categories && Array.isArray(translated.categories)) {
-      translated.categories = translated.categories.map(category => {
-        const translatedCategory = { ...category };
-        
-        if (translatedCategory.labels && Array.isArray(translatedCategory.labels)) {
-          translatedCategory.labels = glossaryTranslator.translateLabels(translatedCategory.labels);
-        }
-        
-        if (translatedCategory.displayNames && Array.isArray(translatedCategory.displayNames)) {
-          translatedCategory.displayNames = glossaryTranslator.translateLabels(translatedCategory.displayNames);
-        }
-        
-        return translatedCategory;
-      });
-    }
 
     // Translate seasonTypes if present (for game log)
     if (translated.seasonTypes && Array.isArray(translated.seasonTypes)) {

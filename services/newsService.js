@@ -27,6 +27,13 @@ class NewsService {
       { url: 'https://nitter.tiekoetter.com', usePuppeteer: false }
     ];
     this.currentInstanceIndex = 0;
+    
+    // List of NBA news Twitter accounts to fetch from
+    this.nbaNewsAccounts = [
+      { username: 'ShamsCharania', author: 'Shams Charania', handle: '@ShamsCharania' },
+      { username: 'TheSteinLine', author: 'Marc Stein', handle: '@TheSteinLine' },
+      { username: 'ChrisBHaynes', author: 'Chris Haynes', handle: '@ChrisBHaynes' }
+    ];
   }
 
   /**
@@ -263,7 +270,7 @@ class NewsService {
     }
 
     // Create the fetching promise and store it
-    this.fetchingPromise = this._fetchShamsTweets();
+    this.fetchingPromise = this._fetchAllAccountsTweets();
     
     try {
       const result = await this.fetchingPromise;
@@ -285,7 +292,7 @@ class NewsService {
     }
 
     try {
-      this.fetchingPromise = this._fetchShamsTweets();
+      this.fetchingPromise = this._fetchAllAccountsTweets();
       await this.fetchingPromise;
     } catch (error) {
       console.error('Background tweet refresh failed:', error);
@@ -295,12 +302,13 @@ class NewsService {
   }
 
   /**
-   * Internal method to fetch tweets (actual implementation)
-   * @private
+   * Fetch tweets from a specific Twitter account
+   * @param {string} username - Twitter username (without @)
+   * @param {string} author - Author display name
+   * @param {string} handle - Twitter handle (with @)
    * @returns {Promise<Array>} Array of tweet objects
    */
-  async _fetchShamsTweets() {
-    const cacheKey = 'shams_tweets';
+  async _fetchAccountTweets(username, author, handle) {
     const maxRetries = this.nitterInstances.length;
     let lastError = null;
 
@@ -308,7 +316,7 @@ class NewsService {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const instance = this.getCurrentInstance();
       const nitterUrl = instance.url;
-      const url = `${nitterUrl}/ShamsCharania`;
+      const url = `${nitterUrl}/${username}`;
       
       try {
         console.log(`Attempting to fetch tweets from ${url} (Puppeteer: ${instance.usePuppeteer})...`);
@@ -445,9 +453,9 @@ class NewsService {
               }
               
               return {
-                id: `shams_${Date.now()}_${index}`,
-                author: 'Shams Charania',
-                authorHandle: '@ShamsCharania',
+                id: `${username}_${Date.now()}_${index}`,
+                author: author,
+                authorHandle: handle,
                 avatar: tweet.avatar, // Avatar URL
                 text: tweet.text,
                 images: tweet.images || [],
@@ -457,13 +465,7 @@ class NewsService {
               };
             });
 
-          // Cache the response
-          this.cache.set(cacheKey, {
-            data: formattedTweets,
-            timestamp: Date.now()
-          });
-
-          console.log(`Successfully extracted ${formattedTweets.length} tweets from ${nitterUrl}`);
+          console.log(`Successfully extracted ${formattedTweets.length} tweets from ${username} via ${nitterUrl}`);
           return formattedTweets;
         } else {
           throw new Error('No tweets found on page');
@@ -479,11 +481,76 @@ class NewsService {
       }
     }
 
-    // All instances failed, return mock data
-    console.error('All Nitter instances failed after trying all options. Returning mock data.');
+    // All instances failed for this account
+    console.error(`All Nitter instances failed for ${username} after trying all options.`);
     console.error('Last error:', lastError?.message);
-    console.error('Note: If you see this but also see a success message, there may be concurrent requests.');
-    return this.getMockTweets();
+    return []; // Return empty array, will be handled by caller
+  }
+
+  /**
+   * Fetch tweets from all NBA news accounts and combine them
+   * @returns {Promise<Array>} Combined array of tweet objects from all accounts
+   */
+  async _fetchAllAccountsTweets() {
+    const cacheKey = 'nba_news_tweets';
+    const allTweets = [];
+    
+    console.log(`Fetching tweets from ${this.nbaNewsAccounts.length} NBA news accounts...`);
+    
+    // Fetch from all accounts in parallel (with concurrency limit)
+    const batchSize = 2; // Process 2 accounts at a time to avoid overwhelming Nitter
+    for (let i = 0; i < this.nbaNewsAccounts.length; i += batchSize) {
+      const batch = this.nbaNewsAccounts.slice(i, i + batchSize);
+      
+      const batchResults = await Promise.allSettled(
+        batch.map(async (account) => {
+          try {
+            const tweets = await this._fetchAccountTweets(
+              account.username,
+              account.author,
+              account.handle
+            );
+            return tweets;
+          } catch (error) {
+            console.error(`Error fetching tweets from ${account.username}:`, error.message);
+            return [];
+          }
+        })
+      );
+      
+      // Collect successful results
+      batchResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+          allTweets.push(...result.value);
+        } else {
+          console.warn(`Failed to fetch from ${batch[index].username}`);
+        }
+      });
+      
+      // Small delay between batches
+      if (i + batchSize < this.nbaNewsAccounts.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    // Sort all tweets by timestamp (newest first)
+    allTweets.sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      return timeB - timeA;
+    });
+    
+    // Limit to latest 30 tweets total
+    const limitedTweets = allTweets.slice(0, 30);
+    
+    // Cache the response
+    this.cache.set(cacheKey, {
+      data: limitedTweets,
+      timestamp: Date.now()
+    });
+    
+    console.log(`Successfully fetched ${limitedTweets.length} tweets from ${this.nbaNewsAccounts.length} accounts`);
+    return limitedTweets;
   }
 
   /**
@@ -512,19 +579,19 @@ class NewsService {
       },
       {
         id: 'mock_2',
-        author: 'Shams Charania',
-        authorHandle: '@ShamsCharania',
-        text: 'Sources: Player X and Team Y are in discussions on a potential contract extension.',
-        images: [],
-        timestamp: new Date(Date.now() - 3600000).toISOString()
-      },
-      {
-        id: 'mock_3',
-        author: 'Shams Charania',
-        authorHandle: '@ShamsCharania',
+        author: 'Marc Stein',
+        authorHandle: '@TheSteinLine',
         text: 'Injury update: Player Z is expected to return to action next week after missing time.',
         images: [],
         timestamp: new Date(Date.now() - 7200000).toISOString()
+      },
+      {
+        id: 'mock_3',
+        author: 'Chris Haynes',
+        authorHandle: '@ChrisBHaynes',
+        text: 'Latest trade rumors and updates from around the league.',
+        images: [],
+        timestamp: new Date(Date.now() - 10800000).toISOString()
       }
     ];
   }

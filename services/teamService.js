@@ -432,6 +432,139 @@ class TeamService {
   }
 
   /**
+   * Fetch all teams' statistics and calculate league-wide rankings
+   * @param {boolean} forceRefresh - If true, bypass cache and fetch fresh data
+   * @returns {Promise<Object>} Rankings object with stat names as keys and arrays of {teamId, value, rank} as values
+   */
+  async getAllTeamsStatRankings(forceRefresh = false) {
+    const cacheKey = 'all_teams_stat_rankings';
+    const cached = this.cache.get(cacheKey);
+    
+    if (cached && !forceRefresh && Date.now() - cached.timestamp < this.cacheTimeout * 2) {
+      return cached.data; // Cache rankings for 10 minutes (2x normal cache)
+    }
+
+    try {
+      console.log('[TeamService] Calculating league-wide stat rankings...');
+      
+      // Fetch statistics for all teams in parallel (with concurrency limit)
+      const batchSize = 5; // Smaller batch for stats (more data)
+      const allTeamStats = new Map(); // teamAbbr -> stats object
+      
+      for (let i = 0; i < this.allTeamAbbreviations.length; i += batchSize) {
+        const batch = this.allTeamAbbreviations.slice(i, i + batchSize);
+        
+        await Promise.allSettled(
+          batch.map(async (abbr) => {
+            try {
+              const stats = await this.getTeamStatistics(abbr);
+              const teamTotals = {};
+              
+              if (stats.teamTotals && Array.isArray(stats.teamTotals)) {
+                stats.teamTotals.forEach(category => {
+                  if (Array.isArray(category.stats)) {
+                    category.stats.forEach(stat => {
+                      // Extract numeric value for ranking
+                      const value = stat.value !== null && stat.value !== undefined 
+                        ? parseFloat(stat.value) 
+                        : null;
+                      teamTotals[stat.name] = {
+                        displayValue: stat.displayValue || stat.value || '-',
+                        value: value
+                      };
+                    });
+                  }
+                });
+              }
+              
+              allTeamStats.set(abbr, teamTotals);
+            } catch (error) {
+              console.error(`[TeamService] Failed to fetch stats for ${abbr}:`, error.message);
+            }
+          })
+        );
+        
+        // Small delay between batches
+        if (i + batchSize < this.allTeamAbbreviations.length) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      // Calculate rankings for each stat
+      const rankings = {};
+      
+      // Stat names to rank (matching frontend display)
+      const statNames = [
+        'avgPoints', 'avgRebounds', 'avgAssists', 'avgSteals', 'avgBlocks',
+        'fieldGoalPct', 'threePointPct', 'freeThrowPct', 'avgTurnovers'
+      ];
+      
+      statNames.forEach(statName => {
+        const teamsWithStat = [];
+        
+        // Collect all teams with this stat
+        allTeamStats.forEach((stats, abbr) => {
+          const stat = stats[statName];
+          if (stat && stat.value !== null && !isNaN(stat.value)) {
+            teamsWithStat.push({
+              teamAbbr: abbr,
+              value: stat.value
+            });
+          }
+        });
+        
+        // Sort by value (descending for most stats, ascending for turnovers)
+        const isAscending = statName === 'avgTurnovers'; // Lower is better for turnovers
+        teamsWithStat.sort((a, b) => {
+          return isAscending ? a.value - b.value : b.value - a.value;
+        });
+        
+        // Assign ranks (handle ties)
+        const ranked = [];
+        let currentRank = 1;
+        for (let i = 0; i < teamsWithStat.length; i++) {
+          if (i > 0 && teamsWithStat[i].value !== teamsWithStat[i - 1].value) {
+            currentRank = i + 1;
+          }
+          ranked.push({
+            teamAbbr: teamsWithStat[i].teamAbbr,
+            value: teamsWithStat[i].value,
+            rank: currentRank
+          });
+        }
+        
+        rankings[statName] = ranked;
+      });
+
+      // Cache the rankings
+      this.cache.set(cacheKey, {
+        data: rankings,
+        timestamp: Date.now()
+      });
+
+      console.log('[TeamService] Stat rankings calculated successfully');
+      return rankings;
+    } catch (error) {
+      console.error('[TeamService] Error calculating stat rankings:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get ranking for a specific team and stat
+   * @param {string} teamAbbreviation - Team abbreviation
+   * @param {string} statName - Stat name
+   * @param {Object} rankings - Rankings object from getAllTeamsStatRankings
+   * @returns {number|null} Rank (1-based) or null if not found
+   */
+  getTeamStatRank(teamAbbreviation, statName, rankings) {
+    if (!rankings || !rankings[statName]) return null;
+    
+    const ranking = rankings[statName].find(r => r.teamAbbr === teamAbbreviation.toLowerCase());
+    return ranking ? ranking.rank : null;
+  }
+
+  /**
    * Pre-fetch all team info for all 30 NBA teams
    * @param {boolean} forceRefresh - If true, bypass cache and fetch fresh data
    * @returns {Promise<Object>} Object with success count and errors

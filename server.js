@@ -141,17 +141,32 @@ class WebServer {
     // Get games for a specific date (defaults to today)
     this.app.get('/api/nba/games/today', async (req, res) => {
       try {
-        const { date, featured } = req.query;
+        const { date, featured, closeGames, overtime, marquee } = req.query;
         const scoreboardData = date 
           ? await nbaService.getScoreboard(date)
           : await nbaService.getTodaysScoreboard();
         // Minimize data for GamesToday page - only return what's needed
         const transformed = gameTransformer.transformScoreboard(scoreboardData, true);
         
+        // Apply filters if specified (backend filtering for iOS compatibility)
+        let filteredGames = transformed.games;
+        if (closeGames === 'true') {
+          filteredGames = filteredGames.filter(game => game.isClosest === true);
+        }
+        if (overtime === 'true') {
+          filteredGames = filteredGames.filter(game => game.isOvertime === true);
+        }
+        if (marquee === 'true') {
+          filteredGames = filteredGames.filter(game => game.isMarquee === true);
+        }
+        
+        // Sort games by priority (always done on backend)
+        const sortedGames = gameTransformer.sortGamesByPriority(filteredGames);
+        
         // If featured=true, identify featured games and sort by priority
         if (featured === 'true') {
-          const { featured: featuredGames, other: otherGames, games: sortedGames } = 
-            gameTransformer.identifyFeaturedGames(transformed.games);
+          const { featured: featuredGames, other: otherGames } = 
+            gameTransformer.identifyFeaturedGames(sortedGames);
           
           res.json({
             ...transformed,
@@ -160,8 +175,6 @@ class WebServer {
             other: otherGames
           });
         } else {
-          // Even without featured=true, sort games by priority
-          const sortedGames = gameTransformer.sortGamesByPriority(transformed.games);
           res.json({
             ...transformed,
             games: sortedGames
@@ -389,19 +402,32 @@ class WebServer {
       try {
         const { teamAbbreviation } = req.params;
         
-        // Fetch team info and statistics
-        const [teamInfo, teamStats] = await Promise.all([
+        // Fetch team info, statistics, and rankings
+        const [teamInfo, teamStats, statRankings] = await Promise.all([
           teamService.getTeamInfo(teamAbbreviation),
-          teamService.getTeamStatistics(teamAbbreviation)
+          teamService.getTeamStatistics(teamAbbreviation),
+          teamService.getAllTeamsStatRankings().catch(() => null) // Don't fail if rankings fail
         ]);
 
-        // Extract only essential team statistics
+        // Extract only essential team statistics with rankings
         const teamTotals = {};
         if (teamStats.teamTotals && Array.isArray(teamStats.teamTotals)) {
           teamStats.teamTotals.forEach(category => {
             if (Array.isArray(category.stats)) {
               category.stats.forEach(stat => {
-                teamTotals[stat.name] = stat.displayValue || stat.value || '-';
+                const statName = stat.name;
+                const displayValue = stat.displayValue || stat.value || '-';
+                
+                // Get ranking if available
+                let rank = null;
+                if (statRankings) {
+                  rank = teamService.getTeamStatRank(teamAbbreviation, statName, statRankings);
+                }
+                
+                teamTotals[statName] = {
+                  value: displayValue,
+                  rank: rank // 1-based rank, or null if not available
+                };
               });
             }
           });
@@ -607,7 +633,7 @@ class WebServer {
       }
     });
 
-    // Get NBA news (Shams Charania tweets)
+    // Get NBA news (tweets from multiple NBA news accounts)
     // Returns cached data immediately (refreshed by cron job every 5 minutes)
     this.app.get('/api/nba/news', async (req, res) => {
       try {
@@ -618,7 +644,7 @@ class WebServer {
         res.json({
           tweets: tweets,
           source: 'Twitter/X',
-          author: 'Shams Charania',
+          authors: ['Shams Charania', 'ESPN NBA', 'Marc Stein', 'Chris Haynes'],
           cached: !forceRefresh // Indicate if data is from cache
         });
       } catch (error) {

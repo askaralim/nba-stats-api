@@ -43,12 +43,21 @@ class GameTransformer {
   minimizeGameForList(game) {
     if (!game) return null;
 
+    // Pre-calculate filter flags to avoid frontend duplication
+    const isOvertime = this.isOvertimeGame(game);
+    const isClosest = this.isClosestGame(game);
+    const isMarquee = this.isMarqueeMatchup(game);
+
     return {
       gameId: game.gameId,
       gameStatus: game.gameStatus,
       gameStatusText: game.gameStatusText,
       gameEt: game.gameEt,
       period: game.period,
+      // Filter flags for frontend filtering
+      isOvertime,
+      isClosest,
+      isMarquee,
       awayTeam: {
         teamName: game.awayTeam?.teamName,
         teamCity: game.awayTeam?.teamCity,
