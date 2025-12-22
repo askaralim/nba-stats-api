@@ -190,7 +190,32 @@ class WebServer {
         if (summaryData?.boxscore) {
           transformed.boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
         }
-        
+
+        // Add season series data if available
+        if (summaryData) {
+          // Debug: Log available keys in summaryData to help identify structure
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[DEBUG] Summary API keys:', Object.keys(summaryData));
+            if (summaryData.seasonSeries) {
+              console.log('[DEBUG] seasonSeries found:', JSON.stringify(summaryData.seasonSeries).substring(0, 200));
+            }
+            if (summaryData.injuryReport) {
+              console.log('[DEBUG] injuryReport found:', JSON.stringify(summaryData.injuryReport).substring(0, 200));
+            }
+          }
+          
+          const seasonSeries = gameTransformer.transformSeasonSeries(summaryData, transformed);
+          if (seasonSeries) {
+            transformed.seasonSeries = seasonSeries;
+          }
+
+          // Add injuries data if available
+          const injuries = gameTransformer.transformInjuries(summaryData, transformed);
+          if (injuries) {
+            transformed.injuries = injuries;
+          }
+        }
+
         res.json(transformed);
       } catch (error) {
         console.error('Error fetching game details:', error);
@@ -201,6 +226,107 @@ class WebServer {
       }
     });
 
+    // Get AI game summary (async, separate endpoint)
+    this.app.get('/api/nba/games/:gameId/summary', async (req, res) => {
+      try {
+        const { gameId } = req.params;
+        
+        // Check if game is finished
+        const gameData = await nbaService.getGameDetails(gameId);
+        const transformed = gameTransformer.transformGame(gameData);
+        
+        if (transformed.gameStatus !== 3) {
+          return res.status(400).json({
+            error: 'Game not finished',
+            message: 'AI summary is only available for finished games'
+          });
+        }
+
+        // Get boxscore data for facts computation
+        const summaryData = await nbaService.getGameSummary(gameId).catch(() => null);
+        if (!summaryData?.boxscore) {
+          return res.status(404).json({
+            error: 'Boxscore not available',
+            message: 'Game boxscore data is required for summary generation'
+          });
+        }
+
+        const boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
+        if (!boxscore?.teamStatistics) {
+          return res.status(404).json({
+            error: 'Team statistics not available',
+            message: 'Team statistics are required for summary generation'
+          });
+        }
+
+        const gameSummaryCache = require('./services/gameSummaryCache');
+        const openaiService = require('./services/openaiService');
+        
+        // Check cache first
+        let aiSummary = gameSummaryCache.get(gameId);
+        
+        if (!aiSummary) {
+          // Compute game facts (deterministic)
+          const gameFacts = gameTransformer.computeGameFacts(
+            transformed,
+            summaryData.boxscore,
+            boxscore.teamStatistics
+          );
+
+          if (gameFacts) {
+            try {
+              // Generate AI summary
+              const summaryText = await openaiService.generateGameSummary(gameFacts);
+              gameSummaryCache.set(gameId, summaryText, 'ai');
+              aiSummary = {
+                summary: summaryText,
+                source: 'ai',
+                generatedAt: new Date().toISOString()
+              };
+            } catch (aiError) {
+              console.error('AI summary generation failed:', aiError.message);
+              // Fallback to algorithmic summary
+              if (boxscore.gameStory) {
+                const fallbackSummary = boxscore.gameStory.summary;
+                gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
+                aiSummary = {
+                  summary: fallbackSummary,
+                  source: 'fallback',
+                  generatedAt: new Date().toISOString()
+                };
+              } else {
+                return res.status(500).json({
+                  error: 'Summary generation failed',
+                  message: 'AI summary generation failed and no fallback available'
+                });
+              }
+            }
+          } else if (boxscore.gameStory) {
+            // Use algorithmic summary as fallback
+            const fallbackSummary = boxscore.gameStory.summary;
+            gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
+            aiSummary = {
+              summary: fallbackSummary,
+              source: 'fallback',
+              generatedAt: new Date().toISOString()
+            };
+          } else {
+            return res.status(500).json({
+              error: 'Summary generation failed',
+              message: 'Unable to compute game facts and no fallback available'
+            });
+          }
+        }
+
+        res.json(aiSummary);
+      } catch (error) {
+        console.error('Error fetching game summary:', error);
+        res.status(500).json({
+          error: 'Failed to fetch game summary',
+          message: error.message
+        });
+      }
+    });
 
     // Get ESPN player stats (via API)
     this.app.get('/api/nba/stats/players', async (req, res) => {

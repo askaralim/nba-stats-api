@@ -185,7 +185,7 @@ class NBAService {
       }
 
       const data = await response.json();
-      
+
       // Cache the response
       this.cache.set(cacheKey, {
         data,
