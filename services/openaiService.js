@@ -147,6 +147,7 @@ console.log('step 2 summary', summary);
    * @returns {string} Formatted prompt
    */
   buildAnalysisPrompt(gameFacts) {
+    console.log('gameFacts', gameFacts);
     const {
       home_team,
       away_team,
@@ -158,16 +159,50 @@ console.log('step 2 summary', summary);
       q2,
       q3,
       q4,
-      fg_home,
-      fg_away,
-      three_home,
-      three_away,
+      fg_home_made,
+      fg_home_attempted,
+      fg_home_percent,
+      fg_away_made,
+      fg_away_attempted,
+      fg_away_percent,
+      three_home_made,
+      three_home_attempted,
+      three_home_percent,
+      three_away_made,
+      three_away_attempted,
+      three_away_percent,
+      ft_home_made,
+      ft_home_attempted,
+      ft_home_percent,
+      ft_away_made,
+      ft_away_attempted,
+      ft_away_percent,
       to_home,
       to_away,
       reb_home,
+      reb_home_offensive,
+      reb_home_defensive,
       reb_away,
+      reb_away_offensive,
+      reb_away_defensive,
       has_overtime,
-      overtime_periods
+      overtime_periods,
+      largest_lead_home,
+      largest_lead_away,
+      foul_home,
+      foul_away,
+      points_in_paint_home,
+      points_in_paint_away,
+      fast_break_points_home,
+      fast_break_points_away,
+      turnover_points_home,
+      turnover_points_away,
+      halftime_leader,
+      winner,
+      top_scorer_home,
+      top_scorer_away,
+      top_points_home,
+      top_points_away,
     } = gameFacts;
 
     // Build overtime section if applicable
@@ -200,7 +235,6 @@ console.log('step 2 summary', summary);
   "away": "LAL",
   "winner": "home/away",
   "halftime_leader": "home/away/tie",
-  "second_half_net_winner": "home/away/tie",
   "overtime": true/false,
   "advantages": {
     "rebounds": "home/away/none",
@@ -209,20 +243,36 @@ console.log('step 2 summary', summary);
     "turnovers": "home/away/none",
     "turnovers_home": number,
     "turnovers_away": number,
-    "fg": "home/away/none",
     "fg_home_made": number,
     "fg_away_made": number,
     "fg_home_attempted": number,
     "fg_away_attempted": number,
     "fg_home_percentage": number,
     "fg_away_percentage": number,
-    "three": "home/away/none",
     "three_pt_home_made": number,
     "three_pt_away_made": number,
     "three_pt_home_attempted": number,
     "three_pt_away_attempted": number,
     "three_pt_home_percentage": number,
     "three_pt_away_percentage": number,
+    "ft_home_made": number,
+    "ft_away_made": number,
+    "ft_home_attempted": number,
+    "ft_away_attempted": number,
+    "ft_home_percentage": number,
+    "ft_away_percentage": number,
+    "points_in_paint_home": number,
+    "points_in_paint_away": number,
+    "fast_break_points_home": number,
+    "fast_break_points_away": number,
+    "turnover_points_home": number,
+    "turnover_points_away": number,
+    "largest_lead_home": number,
+    "largest_lead_away": number,
+    "foul_home": number,
+    "foul_away": number,
+    "decisive_factors": [decisive_factor1, decisive_factor2, ...],
+    "close_game": true/false
   },
   "decisive_factors": [decisive_factor1, decisive_factor2, ...],
   "close_game": true/false
@@ -238,11 +288,29 @@ console.log('step 2 summary', summary);
   Q2: ${q2}
   Q3: ${q3}
   Q4: ${q4}
-${overtimeSection}- 投篮命中率（主/客）：${fg_home}% / ${fg_away}%
-- 三分命中数（主/客）：${three_home} / ${three_away}
+${overtimeSection}
+- 投篮命中数（主）：${fg_home_made} 投篮出手数：${fg_home_attempted}
+- 投篮命中率（主）：${fg_home_percent}%
+- 投篮命中数（客）：${fg_away_made} 投篮出手数：${fg_away_attempted}
+- 投篮命中率（客）：${fg_away_percent}%
+- 三分命中数（主）：${three_home_made} 三分出手数：${three_home_attempted}
+- 三分命中率（主）：${three_home_percent}%
+- 三分命中数（客）：${three_away_made} 三分出手数：${three_away_attempted}
+- 三分命中率（客）：${three_away_percent}%
+- 罚球命中数（主）：${ft_home_made} 罚球出手数：${ft_home_attempted}
+- 罚球命中率（主）：${ft_home_percent}%
+- 罚球命中数（客）：${ft_away_made} 罚球出手数：${ft_away_attempted}
+- 罚球命中率（客）：${ft_away_percent}%
 - 失误（主/客）：${to_home} / ${to_away}
-- 篮板（主/客）：${reb_home} / ${reb_away}`;
-  }
+- 篮板（主/客）：${reb_home} / ${reb_away}
+- 篮板（主/客）：${reb_home_offensive} / ${reb_away_offensive}
+- 篮板（主/客）：${reb_home_defensive} / ${reb_away_defensive}
+- 最大领先（主/客）：${largest_lead_home} / ${largest_lead_away}
+- 犯规（主/客）：${foul_home} / ${foul_away}
+- 内线得分（主/客）：${points_in_paint_home} / ${points_in_paint_away}
+- 快攻得分（主/客）：${fast_break_points_home} / ${fast_break_points_away}
+- 失误得分（主/客）：${turnover_points_home} / ${turnover_points_away}
+  `;}
 
   /**
    * Build Step 2 prompt: Generate summary from analysis
@@ -260,7 +328,8 @@ ${overtimeSection}- 投篮命中率（主/客）：${fg_home}% / ${fg_away}%
 3. 只能将 decisive_factors 中的数据作为胜因
 4. 若有加时赛，只能描述加时比分差异
 5. 禁止使用情绪化或主观词语
-6. 字数 60–120 字
+6. 如果不能准确翻译球队名称，请使用球队英文名或简称。
+7. 字数 60–120 字
 
 【分析结果】
 ${analysisJson}`;

@@ -636,7 +636,9 @@ class GameTransformer {
 
     // Determine which team is which in teamStatistics
     const homeStats = team1.teamId === homeTeam.teamId ? team1 : team2;
+    console.log('homeStats', homeStats);
     const awayStats = team1.teamId === awayTeam.teamId ? team1 : team2;
+    console.log('awayStats', awayStats);
 
     // Parse periods
     // Format: home-away (主队-客队) to match final score format
@@ -669,14 +671,55 @@ class GameTransformer {
       return { made, attempted };
     };
 
-    const homeFG = parseFG(homeStats.fieldGoals || '0-0');
-    const awayFG = parseFG(awayStats.fieldGoals || '0-0');
-    const homeThreePT = parseFG(homeStats.threePointers || '0-0');
-    const awayThreePT = parseFG(awayStats.threePointers || '0-0');
+    const homeFGMade = homeStats.fieldGoals.split('-')[0];
+    const homeFGAttempted = homeStats.fieldGoals.split('-')[1];
+    const homeFGPercent = homeStats.fieldGoalPercent;
+    const awayFGMade = awayStats.fieldGoals.split('-')[0];
+    const awayFGAttempted = awayStats.fieldGoals.split('-')[1];
+    const awayFGPercent = awayStats.fieldGoalPercent;
+    const homeThreePTMade = homeStats.threePointers.split('-')[0];
+    const homeThreePTAttempted = homeStats.threePointers.split('-')[1];
+    const homeThreePTPercent = homeStats.threePointPercent;
+    const awayThreePTMade = awayStats.threePointers.split('-')[0];
+    const awayThreePTAttempted = awayStats.threePointers.split('-')[1];
+    const awayThreePTPercent = awayStats.threePointPercent;
+    const homeFTMade = homeStats.freeThrows.split('-')[0];
+    const homeFTAttempted = homeStats.freeThrows.split('-')[1];
+    const homeFTPercent = homeStats.freeThrowPercent;
+    const awayFTMade = awayStats.freeThrows.split('-')[0];
+    const awayFTAttempted = awayStats.freeThrows.split('-')[1];
+    const awayFTPercent = awayStats.freeThrowPercent;
+    const homeRebounds = homeStats.rebounds;
+    const awayRebounds = awayStats.rebounds;
+    const homeOffensiveRebounds = homeStats.offensiveRebounds;
+    const awayOffensiveRebounds = awayStats.offensiveRebounds;
+    const homeDefensiveRebounds = homeStats.defensiveRebounds;
+    const awayDefensiveRebounds = awayStats.defensiveRebounds;
+    const homeAssists = homeStats.assists;
+    const awayAssists = awayStats.assists;
 
-    // Calculate largest lead (simplified - would need play-by-play for exact)
-    const scoreDiff = Math.abs(homeTeam.score - awayTeam.score);
-    const largestLead = scoreDiff; // Simplified - actual would need period-by-period tracking
+    const homeLargestLead = homeStats.largestLead;
+    const awayLargestLead = awayStats.largestLead;
+    const homeTurnovers = homeStats.turnovers;
+    const awayTurnovers = awayStats.turnovers;
+    const homeSteals = homeStats.steals;
+    const awaySteals = awayStats.steals;
+    const homeBlocks = homeStats.blocks;
+    const awayBlocks = awayStats.blocks;
+    const homeFouls = homeStats.fouls;
+    const awayFouls = awayStats.fouls;
+    const homeTurnoverPoints = homeStats.turnoverPoints;
+    const awayTurnoverPoints = awayStats.turnoverPoints;
+    const homeFastBreakPoints = homeStats.fastBreakPoints;
+    const awayFastBreakPoints = awayStats.fastBreakPoints;
+    const homePointsInPaint = homeStats.pointsInPaint;
+    const awayPointsInPaint = awayStats.pointsInPaint;
+    const homeLeadChanges = homeStats.leadChanges;
+    const awayLeadChanges = awayStats.leadChanges;
+    const homeLeadPercentage = homeStats.leadPercentage;
+    const awayLeadPercentage = awayStats.leadPercentage;
+    const homeTechnicalFouls = homeStats.totalTechnicalFouls;
+    const awayTechnicalFouls = awayStats.totalTechnicalFouls;
 
     // Determine halftime leader
     let halftimeLeader = 'tie';
@@ -716,8 +759,11 @@ class GameTransformer {
       });
     }
 
-    const topScorer = allPlayers.reduce((max, player) => 
-      player.points > (max?.points || 0) ? player : max, null
+    const topScorerHome = allPlayers.reduce((max, player) => 
+      player.teamId === homeTeam.teamId && player.points > (max?.points || 0) ? player : max, null
+    );
+    const topScorerAway = allPlayers.reduce((max, player) => 
+      player.teamId === awayTeam.teamId && player.points > (max?.points || 0) ? player : max, null
     );
 
     return {
@@ -725,32 +771,57 @@ class GameTransformer {
       away_team: awayTeam.teamName,
       home_score: homeTeam.score || 0,
       away_score: awayTeam.score || 0,
+      winner: winner,
       home_half: halftimeHome,
       away_half: halftimeAway,
       q1,
       q2,
       q3,
       q4,
-      fg_home: homeStats.fieldGoalPercent || 0,
-      fg_away: awayStats.fieldGoalPercent || 0,
-      three_home: homeThreePT.made || 0,
-      three_away: awayThreePT.made || 0,
-      to_home: homeStats.turnovers || 0,
-      to_away: awayStats.turnovers || 0,
-      reb_home: homeStats.rebounds || 0,
-      reb_away: awayStats.rebounds || 0,
+      fg_home_made: homeFGMade || 0,
+      fg_home_attempted: homeFGAttempted || 0,
+      fg_home_percent: homeFGPercent || 0,
+      fg_away_made: awayFGMade || 0,
+      fg_away_attempted: awayFGAttempted || 0,
+      fg_away_percent: awayFGPercent || 0,
+      three_home_made: homeThreePTMade || 0,
+      three_home_attempted: homeThreePTAttempted || 0,
+      three_home_percent: homeThreePTPercent || 0,
+      three_away_made: awayThreePTMade || 0,
+      three_away_attempted: awayThreePTAttempted || 0,
+      three_away_percent: awayThreePTPercent || 0,
+      ft_home_made: homeFTMade || 0,
+      ft_home_attempted: homeFTAttempted || 0,
+      ft_home_percent: homeFTPercent || 0,
+      ft_away_made: awayFTMade || 0,
+      ft_away_attempted: awayFTAttempted || 0,
+      ft_away_percent: awayFTPercent || 0,
+      to_home: homeTurnovers || 0,
+      to_away: awayTurnovers || 0,
+      reb_home: homeRebounds || 0,
+      reb_home_offensive: homeOffensiveRebounds || 0,
+      reb_home_defensive: homeDefensiveRebounds || 0,
+      reb_away: awayRebounds || 0,
+      reb_away_offensive: awayOffensiveRebounds || 0,
+      reb_away_defensive: awayDefensiveRebounds || 0,
       has_overtime: hasOvertime,
       overtime_periods: overtimePeriods,
       // Additional facts for potential future use
-      score_diff: scoreDiff,
-      was_close: scoreDiff <= 7,
-      largest_lead: largestLead,
       halftime_leader: halftimeLeader,
-      winner,
-      turnover_diff: (homeStats.turnovers || 0) - (awayStats.turnovers || 0),
-      three_pt_diff: (homeThreePT.made || 0) - (awayThreePT.made || 0),
-      top_scorer: topScorer?.name || '',
-      top_points: topScorer?.points || 0
+      largest_lead_home: homeLargestLead,
+      largest_lead_away: awayLargestLead,
+      foul_home: homeFouls || 0,
+      foul_away: awayFouls || 0,
+      points_in_paint_home: homePointsInPaint || 0,
+      points_in_paint_away: awayPointsInPaint || 0,
+      fast_break_points_home: homeFastBreakPoints || 0,
+      fast_break_points_away: awayFastBreakPoints || 0,
+      turnover_points_home: homeTurnoverPoints || 0,
+      turnover_points_away: awayTurnoverPoints || 0,
+      top_scorer_home: topScorerHome?.name || '',
+      top_scorer_away: topScorerAway?.name || '',
+      top_points_home: topScorerHome?.points || 0,
+      top_points_away: topScorerAway?.points || 0
     };
   }
 
@@ -899,6 +970,8 @@ class GameTransformer {
     // Extract team statistics for Team Stats section
     const teamStatistics = this.extractTeamStatistics(boxscoreData, teamsWithTopPerformers);
 
+    console.log('teamStatistics', teamStatistics);
+
     return {
       teams: teamsWithTopPerformers,
       gameMVP: gameMVP,
@@ -1009,17 +1082,43 @@ class GameTransformer {
 
     const extractTeamStats = (boxscoreTeam, transformedTeam) => {
       // Try to get stats from boxscore team statistics first
-      const teamStats = boxscoreTeam.statistics?.[0];
+      // Structure: boxscoreTeam.statistics is an array of stat objects
+      // Each object has: { name, displayValue, label, abbreviation }
+      const statisticsArray = boxscoreTeam.statistics || [];
+
       let stats = {};
 
-      if (teamStats && teamStats.keys && teamStats.labels) {
-        // Map statistics from boxscore
-        const keys = teamStats.keys || [];
-        const values = teamStats.totals || [];
+      if (statisticsArray.length > 0) {
+        // Parse statistics array into a key-value map
+        statisticsArray.forEach(stat => {
+          if (!stat.name || stat.displayValue === undefined) return;
 
-        keys.forEach((key, index) => {
-          if (values[index] !== undefined && values[index] !== null) {
-            stats[key] = values[index];
+          const statName = stat.name;
+          const displayValue = stat.displayValue;
+
+          // Handle compound stats like "fieldGoalsMade-fieldGoalsAttempted"
+          if (statName.includes('-')) {
+            // Split compound stat names (e.g., "fieldGoalsMade-fieldGoalsAttempted")
+            const parts = statName.split('-');
+            const values = displayValue.split('-').map(v => parseInt(v.trim()) || 0);
+            
+            parts.forEach((part, index) => {
+              if (values[index] !== undefined) {
+                stats[part] = values[index];
+              }
+            });
+          } else {
+            // Single stat - parse displayValue to number
+            // Handle percentage stats (remove % if present, but displayValue is already numeric)
+            let numericValue = displayValue;
+            if (typeof displayValue === 'string') {
+              // Remove any non-numeric characters except decimal point
+              numericValue = parseFloat(displayValue.replace(/[^0-9.]/g, '')) || 0;
+            } else {
+              numericValue = parseFloat(displayValue) || 0;
+            }
+            
+            stats[statName] = numericValue;
           }
         });
       }
@@ -1027,55 +1126,44 @@ class GameTransformer {
       // Fallback: Calculate from player stats if team stats not available
       const allPlayers = [...(transformedTeam.starters || []), ...(transformedTeam.bench || [])];
       
+      // Extract stats from parsed statistics array
+      // Handle both compound names and individual stat names
       let fgMade = stats.fieldGoalsMade || 0;
       let fgAttempted = stats.fieldGoalsAttempted || 0;
       let threePTMade = stats.threePointFieldGoalsMade || 0;
       let threePTAttempted = stats.threePointFieldGoalsAttempted || 0;
       let ftMade = stats.freeThrowsMade || 0;
       let ftAttempted = stats.freeThrowsAttempted || 0;
-      let totalRebounds = stats.rebounds || 0;
+      let totalRebounds = stats.totalRebounds || stats.rebounds || 0;
       let offensiveRebounds = stats.offensiveRebounds || 0;
       let defensiveRebounds = stats.defensiveRebounds || 0;
       let assists = stats.assists || 0;
       let steals = stats.steals || 0;
       let blocks = stats.blocks || 0;
-      let turnovers = stats.turnovers || 0;
+      let turnovers = stats.totalTurnovers || 0;
       let fouls = stats.fouls || 0;
       let points = stats.points || 0;
+      let turnoverPoints = stats.turnoverPoints || 0;
+      let fastBreakPoints = stats.fastBreakPoints || 0;
+      let pointsInPaint = stats.pointsInPaint || 0;
+      let largestLead = stats.largestLead || 0;
+      let leadChanges = stats.leadChanges || 0;
+      let leadPercentage = stats.leadPercentage || 0;
+      let technicalFouls = stats.totalTechnicalFouls || 0;
+      
+      // Get percentages from parsed stats if available
+      // Check if percentages were parsed (use undefined to distinguish from 0%)
+      let fgPercent = stats.fieldGoalPct !== undefined ? stats.fieldGoalPct : undefined;
+      let threePTPercent = stats.threePointFieldGoalPct !== undefined ? stats.threePointFieldGoalPct : undefined;
+      let ftPercent = stats.freeThrowPct !== undefined ? stats.freeThrowPct : undefined;
+
 
       // If stats not in team data, calculate from players
-      if (fgMade === 0 && fgAttempted === 0) {
+      if (points === 0) {
         allPlayers.forEach(player => {
-          const fg = player.stats?.fieldGoals || '0-0';
-          const [fgM, fgA] = fg.split('-').map(Number);
-          fgMade += fgM || 0;
-          fgAttempted += fgA || 0;
-
-          const threePT = player.stats?.threePointers || '0-0';
-          const [threePTM, threePTA] = threePT.split('-').map(Number);
-          threePTMade += threePTM || 0;
-          threePTAttempted += threePTA || 0;
-
-          const ft = player.stats?.freeThrows || '0-0';
-          const [ftM, ftA] = ft.split('-').map(Number);
-          ftMade += ftM || 0;
-          ftAttempted += ftA || 0;
-
-          totalRebounds += parseInt(player.stats?.rebounds || 0);
-          offensiveRebounds += parseInt(player.stats?.offensiveRebounds || 0);
-          defensiveRebounds += parseInt(player.stats?.defensiveRebounds || 0);
-          assists += parseInt(player.stats?.assists || 0);
-          steals += parseInt(player.stats?.steals || 0);
-          blocks += parseInt(player.stats?.blocks || 0);
-          turnovers += parseInt(player.stats?.turnovers || 0);
-          fouls += parseInt(player.stats?.fouls || 0);
           points += parseInt(player.stats?.points || 0);
         });
       }
-
-      const fgPercent = fgAttempted > 0 ? Math.round((fgMade / fgAttempted) * 100) : 0;
-      const threePTPercent = threePTAttempted > 0 ? Math.round((threePTMade / threePTAttempted) * 100) : 0;
-      const ftPercent = ftAttempted > 0 ? Math.round((ftMade / ftAttempted) * 100) : 0;
 
       return {
         teamId: transformedTeam.teamId,
@@ -1096,7 +1184,14 @@ class GameTransformer {
         blocks: blocks,
         turnovers: turnovers,
         fouls: fouls,
-        points: points
+        points: points,
+        turnoverPoints: turnoverPoints,
+        fastBreakPoints: fastBreakPoints,
+        pointsInPaint: pointsInPaint,
+        largestLead: largestLead,
+        leadChanges: leadChanges,
+        leadPercentage: leadPercentage,
+        technicalFouls: technicalFouls
       };
     };
 
