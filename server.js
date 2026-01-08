@@ -8,6 +8,27 @@ const newsService = require('./services/newsService');
 const playerService = require('./services/playerService');
 const gameTransformer = require('./utils/gameTransformer');
 
+// Middleware
+const corsMiddleware = require('./middleware/cors');
+const { standardRateLimiter, strictRateLimiter } = require('./middleware/rateLimiter');
+const {
+  validateGameId,
+  validateDate,
+  validateTeamAbbreviation,
+  validatePlayerId,
+  validatePagination,
+  validateGameFilters
+} = require('./middleware/validation');
+const {
+  asyncHandler,
+  errorHandler,
+  notFoundHandler,
+  sendSuccess,
+  NotFoundError,
+  ValidationError,
+  ExternalAPIError
+} = require('./middleware/errorHandler');
+
 class WebServer {
   constructor(port = 3000) {
     this.app = express();
@@ -24,18 +45,14 @@ class WebServer {
     // Parse URL-encoded bodies
     this.app.use(express.urlencoded({ extended: true }));
 
-    // CORS middleware for frontend
-    const corsOrigin = process.env.CORS_ORIGIN || '*';
-    this.app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Origin', corsOrigin);
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-      if (req.method === 'OPTIONS') {
-        res.sendStatus(200);
-      } else {
-        next();
-      }
-    });
+    // Trust proxy for accurate IP addresses (important for rate limiting)
+    this.app.set('trust proxy', 1);
+
+    // CORS middleware (supports web and mobile)
+    this.app.use(corsMiddleware);
+
+    // Rate limiting (applied to all routes)
+    this.app.use('/api', standardRateLimiter);
   }
 
   setupCronJobs() {
@@ -130,17 +147,19 @@ class WebServer {
   setupRoutes() {
     // Health check endpoint
     this.app.get('/health', (req, res) => {
-      res.json({ status: 'ok', message: 'Server is running' });
+      sendSuccess(res, { status: 'ok', message: 'Server is running' });
     });
 
     // Root endpoint
     this.app.get('/', (req, res) => {
-      res.json({ message: 'Welcome to NBA Stats Demo API' });
+      sendSuccess(res, { message: 'Welcome to NBA Stats Demo API' });
     });
 
     // Get games for a specific date (defaults to today)
-    this.app.get('/api/nba/games/today', async (req, res) => {
-      try {
+    this.app.get('/api/nba/games/today',
+      validateDate,
+      validateGameFilters,
+      asyncHandler(async (req, res) => {
         const { date, featured, closeGames, overtime, marquee } = req.query;
         const scoreboardData = date 
           ? await nbaService.getScoreboard(date)
@@ -168,30 +187,25 @@ class WebServer {
           const { featured: featuredGames, other: otherGames } = 
             gameTransformer.identifyFeaturedGames(sortedGames);
           
-          res.json({
+          sendSuccess(res, {
             ...transformed,
             games: sortedGames, // All games sorted by priority
             featured: featuredGames,
             other: otherGames
           });
         } else {
-          res.json({
+          sendSuccess(res, {
             ...transformed,
             games: sortedGames
           });
         }
-      } catch (error) {
-        console.error('Error fetching games:', error);
-        res.status(500).json({
-          error: 'Failed to fetch games',
-          message: error.message
-        });
-      }
-    });
+      })
+    );
 
     // Get game details by gameId
-    this.app.get('/api/nba/games/:gameId', async (req, res) => {
-      try {
+    this.app.get('/api/nba/games/:gameId',
+      validateGameId,
+      asyncHandler(async (req, res) => {
         const { gameId } = req.params;
         const [gameData, summaryData] = await Promise.all([
           nbaService.getGameDetails(gameId),
@@ -229,19 +243,15 @@ class WebServer {
           }
         }
 
-        res.json(transformed);
-      } catch (error) {
-        console.error('Error fetching game details:', error);
-        res.status(500).json({
-          error: 'Failed to fetch game details',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, transformed);
+      })
+    );
 
-    // Get AI game summary (async, separate endpoint)
-    this.app.get('/api/nba/games/:gameId/summary', async (req, res) => {
-      try {
+    // Get AI game summary (async, separate endpoint) - Strict rate limit for expensive AI operations
+    this.app.get('/api/nba/games/:gameId/summary',
+      validateGameId,
+      strictRateLimiter,
+      asyncHandler(async (req, res) => {
         const { gameId } = req.params;
         
         // Check if game is finished
@@ -249,27 +259,44 @@ class WebServer {
         const transformed = gameTransformer.transformGame(gameData);
         
         if (transformed.gameStatus !== 3) {
-          return res.status(400).json({
-            error: 'Game not finished',
-            message: 'AI summary is only available for finished games'
-          });
+          throw new ValidationError('AI summary is only available for finished games');
         }
 
         // Get boxscore data for facts computation
         const summaryData = await nbaService.getGameSummary(gameId).catch(() => null);
         if (!summaryData?.boxscore) {
-          return res.status(404).json({
-            error: 'Boxscore not available',
-            message: 'Game boxscore data is required for summary generation'
-          });
+          throw new NotFoundError('Game boxscore');
         }
 
         const boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
-        if (!boxscore?.teamStatistics) {
-          return res.status(404).json({
-            error: 'Team statistics not available',
-            message: 'Team statistics are required for summary generation'
-          });
+        if (!boxscore) {
+          throw new NotFoundError('Game boxscore');
+        }
+        
+        // Extract team statistics from boxscore teams
+        let teamStatistics = boxscore.teamStatistics;
+        if (!teamStatistics && boxscore.teams && boxscore.teams.length >= 2) {
+          // Try to extract team statistics from boxscore teams if not already extracted
+          teamStatistics = gameTransformer.extractTeamStatistics(summaryData.boxscore, boxscore.teams);
+          if (teamStatistics) {
+            // Add teamStatistics to boxscore for future use
+            boxscore.teamStatistics = teamStatistics;
+          }
+        }
+        
+        if (!teamStatistics) {
+          // Log debug info in development
+          if (process.env.NODE_ENV === 'development') {
+            console.error('[Summary API] Failed to extract team statistics:', {
+              hasBoxscore: !!boxscore,
+              hasTeams: !!boxscore?.teams,
+              teamsLength: boxscore?.teams?.length,
+              hasTeamStatistics: !!boxscore?.teamStatistics,
+              boxscoreKeys: boxscore ? Object.keys(boxscore) : [],
+              summaryDataKeys: summaryData ? Object.keys(summaryData) : []
+            });
+          }
+          throw new NotFoundError('Team statistics');
         }
 
         const gameSummaryCache = require('./services/gameSummaryCache');
@@ -283,7 +310,7 @@ class WebServer {
           const gameFacts = gameTransformer.computeGameFacts(
             transformed,
             summaryData.boxscore,
-            boxscore.teamStatistics
+            teamStatistics
           );
 
           if (gameFacts) {
@@ -308,10 +335,7 @@ class WebServer {
                   generatedAt: new Date().toISOString()
                 };
               } else {
-                return res.status(500).json({
-                  error: 'Summary generation failed',
-                  message: 'AI summary generation failed and no fallback available'
-                });
+                throw new ExternalAPIError('AI summary generation failed and no fallback available');
               }
             }
           } else if (boxscore.gameStory) {
@@ -324,26 +348,18 @@ class WebServer {
               generatedAt: new Date().toISOString()
             };
           } else {
-            return res.status(500).json({
-              error: 'Summary generation failed',
-              message: 'Unable to compute game facts and no fallback available'
-            });
+            throw new ExternalAPIError('Unable to compute game facts and no fallback available');
           }
         }
 
-        res.json(aiSummary);
-      } catch (error) {
-        console.error('Error fetching game summary:', error);
-        res.status(500).json({
-          error: 'Failed to fetch game summary',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, aiSummary);
+      })
+    );
 
     // Get ESPN player stats (via API)
-    this.app.get('/api/nba/stats/players', async (req, res) => {
-      try {
+    this.app.get('/api/nba/stats/players',
+      validatePagination,
+      asyncHandler(async (req, res) => {
         const {
           season = '2026|2',
           position = 'all-positions',
@@ -363,19 +379,13 @@ class WebServer {
         };
 
         const statsData = await espnScraperService.getPlayerStats(options);
-        res.json(statsData);
-      } catch (error) {
-        console.error('Error fetching ESPN player stats:', error);
-        res.status(500).json({
-          error: 'Failed to fetch player stats',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, statsData);
+      })
+    );
 
     // Get NBA standings
-    this.app.get('/api/nba/standings', async (req, res) => {
-      try {
+    this.app.get('/api/nba/standings',
+      asyncHandler(async (req, res) => {
         const {
           season = '2026',
           seasonType = '2'
@@ -387,19 +397,14 @@ class WebServer {
         };
 
         const standingsData = await standingsService.getStandings(options);
-        res.json(standingsData);
-      } catch (error) {
-        console.error('Error fetching standings:', error);
-        res.status(500).json({
-          error: 'Failed to fetch standings',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, standingsData);
+      })
+    );
 
     // Get team details (info + essential statistics only)
-    this.app.get('/api/nba/teams/:teamAbbreviation', async (req, res) => {
-      try {
+    this.app.get('/api/nba/teams/:teamAbbreviation',
+      validateTeamAbbreviation,
+      asyncHandler(async (req, res) => {
         const { teamAbbreviation } = req.params;
         
         // Fetch team info, statistics, and rankings
@@ -500,7 +505,7 @@ class WebServer {
         }
 
         // Return only what frontend needs
-        res.json({
+        sendSuccess(res, {
           team: {
             id: teamInfo.id,
             name: teamInfo.displayName || `${teamInfo.location} ${teamInfo.name}`,
@@ -512,50 +517,35 @@ class WebServer {
           teamStats: teamTotals,
           players: players
         });
-      } catch (error) {
-        console.error('Error fetching team details:', error);
-        res.status(500).json({
-          error: 'Failed to fetch team details',
-          message: error.message
-        });
-      }
-    });
+      })
+    );
 
     // Get team schedule
-    this.app.get('/api/nba/teams/:teamAbbreviation/schedule', async (req, res) => {
-      try {
+    this.app.get('/api/nba/teams/:teamAbbreviation/schedule',
+      validateTeamAbbreviation,
+      asyncHandler(async (req, res) => {
         const { teamAbbreviation } = req.params;
         const { seasontype = '2' } = req.query;
         
         const scheduleData = await teamService.getTeamSchedule(teamAbbreviation, parseInt(seasontype));
-        res.json(scheduleData);
-      } catch (error) {
-        console.error('Error fetching team schedule:', error);
-        res.status(500).json({
-          error: 'Failed to fetch team schedule',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, scheduleData);
+      })
+    );
 
     // Get team leaders (transformed - offense and defense)
-    this.app.get('/api/nba/teams/:teamAbbreviation/leaders', async (req, res) => {
-      try {
+    this.app.get('/api/nba/teams/:teamAbbreviation/leaders',
+      validateTeamAbbreviation,
+      asyncHandler(async (req, res) => {
         const { teamAbbreviation } = req.params;
         const leaders = await teamService.getTeamLeaders(teamAbbreviation);
-        res.json(leaders);
-      } catch (error) {
-        console.error('Error fetching team leaders:', error);
-        res.status(500).json({
-          error: 'Failed to fetch team leaders',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, leaders);
+      })
+    );
 
     // Get recent games (last 5 completed, next 3 upcoming)
-    this.app.get('/api/nba/teams/:teamAbbreviation/recent-games', async (req, res) => {
-      try {
+    this.app.get('/api/nba/teams/:teamAbbreviation/recent-games',
+      validateTeamAbbreviation,
+      asyncHandler(async (req, res) => {
         const { teamAbbreviation } = req.params;
         const { seasontype = '2' } = req.query;
         
@@ -564,23 +554,28 @@ class WebServer {
         const teamId = teamInfo.id;
         
         const recentGames = await teamService.getRecentGames(teamAbbreviation, teamId, parseInt(seasontype));
-        res.json(recentGames);
-      } catch (error) {
-        console.error('Error fetching recent games:', error);
-        res.status(500).json({
-          error: 'Failed to fetch recent games',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, recentGames);
+      })
+    );
 
     // Get home page data (today's top performers and season leaders)
-    this.app.get('/api/nba/home', async (req, res) => {
-      try {
+    this.app.get('/api/nba/home',
+      asyncHandler(async (req, res) => {
         const { date } = req.query;
         
-        // Get today's top performers from completed games
-        const todayTopPerformers = await nbaService.getTodayTopPerformers(date);
+        // Get today's top performers from completed games (with error handling)
+        let todayTopPerformers;
+        try {
+          todayTopPerformers = await nbaService.getTodayTopPerformers(date);
+        } catch (error) {
+          console.error('Error fetching today top performers, using empty result:', error.message);
+          // Return empty result instead of failing the entire endpoint
+          todayTopPerformers = {
+            points: [],
+            rebounds: [],
+            assists: []
+          };
+        }
         
         // Get top 3 season leaders (using existing player stats endpoint logic)
         const seasonLeaders = await espnScraperService.getPlayerStats({
@@ -620,132 +615,96 @@ class WebServer {
           }))
         };
 
-        res.json({
+        sendSuccess(res, {
           todayTopPerformers: todayTopPerformers,
           seasonLeaders: topSeasonLeaders
         });
-      } catch (error) {
-        console.error('Error fetching home page data:', error);
-        res.status(500).json({
-          error: 'Failed to fetch home page data',
-          message: error.message
-        });
-      }
-    });
+      })
+    );
 
     // Get NBA news (tweets from multiple NBA news accounts)
     // Returns cached data immediately (refreshed by cron job every 5 minutes)
-    this.app.get('/api/nba/news', async (req, res) => {
-      try {
+    this.app.get('/api/nba/news',
+      asyncHandler(async (req, res) => {
         // Check if client wants to force refresh
         const forceRefresh = req.query.refresh === 'true';
         
         const tweets = await newsService.getShamsTweets(forceRefresh);
-        res.json({
+        sendSuccess(res, {
           tweets: tweets,
           source: 'Twitter/X',
           authors: ['Shams Charania', 'ESPN NBA', 'Marc Stein', 'Chris Haynes'],
           cached: !forceRefresh // Indicate if data is from cache
         });
-      } catch (error) {
-        console.error('Error fetching news:', error);
-        res.status(500).json({
-          error: 'Failed to fetch news',
-          message: error.message
-        });
-      }
-    });
+      })
+    );
 
     // Get player bio information
     // Get player details (clean, pre-processed)
-    this.app.get('/api/nba/players/:playerId', async (req, res) => {
-      try {
+    this.app.get('/api/nba/players/:playerId',
+      validatePlayerId,
+      asyncHandler(async (req, res) => {
         const { playerId } = req.params;
         const playerDetails = await playerService.getPlayerDetails(playerId);
-        res.json(playerDetails);
-      } catch (error) {
-        console.error('Error fetching player details:', error);
-        res.status(500).json({
-          error: 'Failed to fetch player details',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, playerDetails);
+      })
+    );
 
     // Get player bio (clean, without teamHistory)
-    this.app.get('/api/nba/players/:playerId/bio', async (req, res) => {
-      try {
+    this.app.get('/api/nba/players/:playerId/bio',
+      validatePlayerId,
+      asyncHandler(async (req, res) => {
         const { playerId } = req.params;
         const bio = await playerService.getPlayerBioData(playerId);
-        res.json(bio);
-      } catch (error) {
-        console.error('Error fetching player bio:', error);
-        res.status(500).json({
-          error: 'Failed to fetch player bio',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, bio);
+      })
+    );
 
     // Get current season stats (flattened)
-    this.app.get('/api/nba/players/:playerId/stats/current', async (req, res) => {
-      try {
+    this.app.get('/api/nba/players/:playerId/stats/current',
+      validatePlayerId,
+      asyncHandler(async (req, res) => {
         const { playerId } = req.params;
         const currentStats = await playerService.getPlayerCurrentSeasonStats(playerId);
-        res.json(currentStats);
-      } catch (error) {
-        console.error('Error fetching current season stats:', error);
-        res.status(500).json({
-          error: 'Failed to fetch current season stats',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, currentStats);
+      })
+    );
 
     // Get regular season stats (with labels)
-    this.app.get('/api/nba/players/:playerId/stats', async (req, res) => {
-      try {
+    this.app.get('/api/nba/players/:playerId/stats',
+      validatePlayerId,
+      asyncHandler(async (req, res) => {
         const { playerId } = req.params;
         const regularStats = await playerService.getPlayerRegularSeasonStats(playerId);
-        res.json(regularStats);
-      } catch (error) {
-        console.error('Error fetching regular season stats:', error);
-        res.status(500).json({
-          error: 'Failed to fetch regular season stats',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, regularStats);
+      })
+    );
 
     // Get advanced statistics (with labels and glossary)
-    this.app.get('/api/nba/players/:playerId/stats/advanced', async (req, res) => {
-      try {
+    this.app.get('/api/nba/players/:playerId/stats/advanced',
+      validatePlayerId,
+      asyncHandler(async (req, res) => {
         const { playerId } = req.params;
         const advancedStats = await playerService.getPlayerAdvancedStatsData(playerId);
-        res.json(advancedStats);
-      } catch (error) {
-        console.error('Error fetching player advanced stats:', error);
-        res.status(500).json({
-          error: 'Failed to fetch player advanced stats',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, advancedStats);
+      })
+    );
 
     // Get last 5 games (flattened)
-    this.app.get('/api/nba/players/:playerId/gamelog', async (req, res) => {
-      try {
+    this.app.get('/api/nba/players/:playerId/gamelog',
+      validatePlayerId,
+      asyncHandler(async (req, res) => {
         const { playerId } = req.params;
         const last5Games = await playerService.getPlayerLast5Games(playerId);
-        res.json(last5Games);
-      } catch (error) {
-        console.error('Error fetching player game log:', error);
-        res.status(500).json({
-          error: 'Failed to fetch player game log',
-          message: error.message
-        });
-      }
-    });
+        sendSuccess(res, last5Games);
+      })
+    );
+
+    // 404 handler for undefined routes (must be after all routes)
+    this.app.use(notFoundHandler);
+
+    // Global error handler (must be last)
+    this.app.use(errorHandler);
   }
 
   start() {

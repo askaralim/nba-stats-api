@@ -48,6 +48,10 @@ class GameTransformer {
     const isClosest = this.isClosestGame(game);
     const isMarquee = this.isMarqueeMatchup(game);
 
+    // Use standardized team format
+    const awayTeam = game.awayTeam ? this.createStandardTeam(game.awayTeam) : null;
+    const homeTeam = game.homeTeam ? this.createStandardTeam(game.homeTeam) : null;
+
     return {
       gameId: game.gameId,
       gameStatus: game.gameStatus,
@@ -58,24 +62,26 @@ class GameTransformer {
       isOvertime,
       isClosest,
       isMarquee,
-      awayTeam: {
-        teamName: game.awayTeam?.teamName,
-        teamCity: game.awayTeam?.teamCity,
-        abbreviation: game.awayTeam?.teamTricode,
-        logo: game.awayTeam?.logo,
-        wins: game.awayTeam?.wins,
-        losses: game.awayTeam?.losses,
-        score: game.awayTeam?.score
-      },
-      homeTeam: {
-        teamName: game.homeTeam?.teamName,
-        teamCity: game.homeTeam?.teamCity,
-        abbreviation: game.homeTeam?.teamTricode,
-        logo: game.homeTeam?.logo,
-        wins: game.homeTeam?.wins,
-        losses: game.homeTeam?.losses,
-        score: game.homeTeam?.score
-      }
+      awayTeam: awayTeam ? {
+        id: awayTeam.id,
+        name: awayTeam.name,
+        city: awayTeam.city,
+        abbreviation: awayTeam.abbreviation,
+        logo: awayTeam.logo,
+        wins: awayTeam.wins,
+        losses: awayTeam.losses,
+        score: awayTeam.score
+      } : null,
+      homeTeam: homeTeam ? {
+        id: homeTeam.id,
+        name: homeTeam.name,
+        city: homeTeam.city,
+        abbreviation: homeTeam.abbreviation,
+        logo: homeTeam.logo,
+        wins: homeTeam.wins,
+        losses: homeTeam.losses,
+        score: homeTeam.score
+      } : null
     };
   }
 
@@ -85,10 +91,11 @@ class GameTransformer {
    * @returns {boolean} True if marquee matchup
    */
   isMarqueeMatchup(game) {
-    if (!game?.awayTeam?.abbreviation || !game?.homeTeam?.abbreviation) return false;
+    // Support both old and new field names during migration
+    const awayAbbr = (game?.awayTeam?.abbreviation || game?.awayTeam?.teamTricode || game?.awayTeam?.teamAbbreviation || '').toUpperCase();
+    const homeAbbr = (game?.homeTeam?.abbreviation || game?.homeTeam?.teamTricode || game?.homeTeam?.teamAbbreviation || '').toUpperCase();
     
-    const awayAbbr = game.awayTeam.abbreviation.toUpperCase();
-    const homeAbbr = game.homeTeam.abbreviation.toUpperCase();
+    if (!awayAbbr || !homeAbbr) return false;
     
     // Any game involving GSW is a marquee matchup
     if (awayAbbr === 'GS' || homeAbbr === 'GS') {
@@ -246,9 +253,10 @@ class GameTransformer {
     // Categorize games into featured and other
     sortedGames.forEach(game => {
       const isLive = game.gameStatus === 2;
-      const isMarquee = this.isMarqueeMatchup(game);
-      const isOT = this.isOvertimeGame(game);
-      const isClosest = this.isClosestGame(game);
+      // Use pre-calculated flags from transformScoreboard if available, otherwise calculate
+      const isMarquee = game.isMarquee !== undefined ? game.isMarquee : this.isMarqueeMatchup(game);
+      const isOT = game.isOvertime !== undefined ? game.isOvertime : this.isOvertimeGame(game);
+      const isClosest = game.isClosest !== undefined ? game.isClosest : this.isClosestGame(game);
 
       // Featured games: live marquee, live closest, live OT, closest, OT
       if ((isLive && isMarquee) || 
@@ -281,7 +289,7 @@ class GameTransformer {
    * Pre-calculate top performers for a team
    * @param {Array} players - Array of player objects
    * @param {number} limit - Number of top performers per category
-   * @param {Object} teamInfo - Optional team info to include in performers (teamName, teamLogo, teamAbbreviation)
+   * @param {Object} teamInfo - Optional team info to include in performers (name, logo, abbreviation)
    * @returns {Object} Top performers by category
    */
   getTopPerformers(players, limit = 3, teamInfo = null) {
@@ -303,9 +311,9 @@ class GameTransformer {
         .map(player => ({
           ...player,
           ...(teamInfo && {
-            teamName: teamInfo.teamName,
-            teamLogo: teamInfo.teamLogo,
-            teamAbbreviation: teamInfo.teamAbbreviation
+            teamName: teamInfo.name, // Use standardized 'name'
+            teamLogo: teamInfo.logo,
+            teamAbbreviation: teamInfo.abbreviation // Use standardized 'abbreviation'
           })
         }));
     });
@@ -481,38 +489,74 @@ class GameTransformer {
   }
 
   /**
-   * Transform team competitor data
+   * Create standardized team object (unified structure)
+   * @param {Object} teamData - Team data from various sources
+   * @param {Object} options - Additional options (score, wins, losses, periods)
+   * @returns {Object} Standardized team object
+   */
+  createStandardTeam(teamData, options = {}) {
+    if (!teamData) return null;
+
+    // Handle different input formats
+    let teamId, name, city, abbreviation, logo;
+    
+    if (teamData.team) {
+      // ESPN competitor format
+      const team = teamData.team;
+      teamId = String(team.id);
+      const displayName = team.displayName || '';
+      const parts = displayName.split(' ');
+      city = parts.slice(0, -1).join(' ') || team.location || '';
+      name = parts[parts.length - 1] || displayName;
+      abbreviation = team.abbreviation || '';
+      logo = team.logo || `https://a.espncdn.com/i/teamlogos/nba/500/${abbreviation?.toLowerCase()}.png`;
+    } else if (teamData.teamId || teamData.id) {
+      // Already transformed format
+      teamId = String(teamData.teamId || teamData.id);
+      name = teamData.teamName || teamData.name || '';
+      city = teamData.teamCity || teamData.city || '';
+      abbreviation = teamData.teamTricode || teamData.teamAbbreviation || teamData.abbreviation || '';
+      logo = teamData.logo || teamData.teamLogo || `https://a.espncdn.com/i/teamlogos/nba/500/${abbreviation?.toLowerCase()}.png`;
+    } else {
+      return null;
+    }
+
+    return {
+      id: teamId,
+      name: name,
+      city: city,
+      abbreviation: abbreviation, // ALWAYS use 'abbreviation' (not teamTricode, teamAbbreviation)
+      logo: logo,
+      wins: options.wins !== undefined ? options.wins : (teamData.wins !== undefined ? teamData.wins : null),
+      losses: options.losses !== undefined ? options.losses : (teamData.losses !== undefined ? teamData.losses : null),
+      score: options.score !== undefined ? options.score : (teamData.score !== undefined ? teamData.score : null),
+      periods: options.periods !== undefined ? options.periods : (teamData.periods || null)
+    };
+  }
+
+  /**
+   * Transform team competitor data (uses standardized format)
    * @param {Object} competitor - ESPN competitor object
-   * @returns {Object} Transformed team data
+   * @returns {Object} Standardized team data
    */
   transformTeam(competitor) {
     if (!competitor?.team) return null;
 
-    const team = competitor.team;
     const overallRecord = competitor.records?.find(r => r.type === 'total') || {};
     const { wins, losses } = this.parseRecord(overallRecord.summary);
 
-    // Extract city and name from displayName (e.g., "Oklahoma City Thunder")
-    const displayName = team.displayName || '';
-    const parts = displayName.split(' ');
-    const city = parts.slice(0, -1).join(' ');
-    const name = parts[parts.length - 1] || displayName;
+    const periods = (competitor.linescores || []).map(ls => ({
+      period: ls.period,
+      score: ls.value,
+      periodType: ls.period <= 4 ? 'REGULAR' : 'OVERTIME'
+    }));
 
-    return {
-      teamId: String(team.id),
-      teamName: name,
-      teamCity: city || team.location || '',
-      teamTricode: team.abbreviation || '',
+    return this.createStandardTeam(competitor, {
       wins,
       losses,
       score: competitor.score ? parseInt(competitor.score, 10) : null,
-      logo: team.logo || `https://a.espncdn.com/i/teamlogos/nba/500/${team.abbreviation?.toLowerCase()}.png`,
-      periods: (competitor.linescores || []).map(ls => ({
-        period: ls.period,
-        score: ls.value,
-        periodType: ls.period <= 4 ? 'REGULAR' : 'OVERTIME'
-      }))
-    };
+      periods: periods.length > 0 ? periods : null
+    });
   }
 
   /**
@@ -634,11 +678,13 @@ class GameTransformer {
     const homeTeam = game.homeTeam;
     const awayTeam = game.awayTeam;
 
-    // Determine which team is which in teamStatistics
-    const homeStats = team1.teamId === homeTeam.teamId ? team1 : team2;
-    console.log('homeStats', homeStats);
-    const awayStats = team1.teamId === awayTeam.teamId ? team1 : team2;
-    console.log('awayStats', awayStats);
+    // Determine which team is which in teamStatistics (support both old and new formats)
+    const team1Id = team1.teamId || team1.id;
+    const team2Id = team2.teamId || team2.id;
+    const homeTeamIdForStats = homeTeam.id || homeTeam.teamId;
+    const awayTeamIdForStats = awayTeam.id || awayTeam.teamId;
+    const homeStats = String(team1Id) === String(homeTeamIdForStats) ? team1 : team2;
+    const awayStats = String(team1Id) === String(awayTeamIdForStats) ? team1 : team2;
 
     // Parse periods
     // Format: home-away (主队-客队) to match final score format
@@ -759,16 +805,18 @@ class GameTransformer {
       });
     }
 
+    const homeTeamIdForScorer = homeTeam.id || homeTeam.teamId;
+    const awayTeamIdForScorer = awayTeam.id || awayTeam.teamId;
     const topScorerHome = allPlayers.reduce((max, player) => 
-      player.teamId === homeTeam.teamId && player.points > (max?.points || 0) ? player : max, null
+      String(player.teamId) === String(homeTeamIdForScorer) && player.points > (max?.points || 0) ? player : max, null
     );
     const topScorerAway = allPlayers.reduce((max, player) => 
-      player.teamId === awayTeam.teamId && player.points > (max?.points || 0) ? player : max, null
+      String(player.teamId) === String(awayTeamIdForScorer) && player.points > (max?.points || 0) ? player : max, null
     );
 
-    return {
-      home_team: homeTeam.teamName,
-      away_team: awayTeam.teamName,
+      return {
+        home_team: homeTeam.name || homeTeam.teamName, // Support both formats
+        away_team: awayTeam.name || awayTeam.teamName, // Support both formats
       home_score: homeTeam.score || 0,
       away_score: awayTeam.score || 0,
       winner: winner,
@@ -826,27 +874,76 @@ class GameTransformer {
   }
 
   transformBoxscore(boxscoreData) {
-    if (!boxscoreData?.teams || !boxscoreData?.players) {
+    if (!boxscoreData?.teams) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[transformBoxscore] Missing boxscoreData.teams');
+      }
       return null;
     }
 
-    const teams = boxscoreData.teams.map(teamData => ({
-      teamId: teamData.team.id,
-      teamName: teamData.team.displayName,
-      teamAbbreviation: teamData.team.abbreviation,
-      teamLogo: teamData.team.logo,
-      homeAway: teamData.homeAway,
-      statistics: teamData.statistics || []
-    }));
+    // Transform teams using standardized format
+    const teams = boxscoreData.teams.map(teamData => {
+      const standardTeam = this.createStandardTeam({
+        team: teamData.team
+      });
+      return {
+        ...standardTeam,
+        homeAway: teamData.homeAway,
+        statistics: teamData.statistics || []
+      };
+    });
 
     // Process players - boxscore.players is an array of team entries, each containing athletes
     const allPlayers = [];
     
+    // Check if players data exists
+    if (!boxscoreData.players || !Array.isArray(boxscoreData.players)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[transformBoxscore] Missing or invalid boxscoreData.players:', {
+          hasPlayers: !!boxscoreData.players,
+          isArray: Array.isArray(boxscoreData.players),
+          keys: boxscoreData ? Object.keys(boxscoreData) : []
+        });
+      }
+      // Return teams with empty arrays if no players data
+      return {
+        teams: teams.map(team => ({
+          ...team,
+          starters: [],
+          bench: [],
+          didNotPlay: [],
+          topPerformers: {
+            points: [],
+            rebounds: [],
+            assists: [],
+            plusMinus: [],
+            steals: [],
+            blocks: []
+          }
+        })),
+        gameMVP: null
+      };
+    }
+    
     boxscoreData.players.forEach(teamPlayerData => {
       const team = teamPlayerData.team;
+      if (!team) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[transformBoxscore] Missing team in teamPlayerData');
+        }
+        return;
+      }
+      
       const stats = teamPlayerData.statistics?.[0];
       
       if (!stats || !stats.athletes) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[transformBoxscore] Missing stats or athletes for team:', team.id, {
+            hasStats: !!stats,
+            hasAthletes: !!stats?.athletes,
+            statisticsLength: teamPlayerData.statistics?.length
+          });
+        }
         return;
       }
 
@@ -855,6 +952,10 @@ class GameTransformer {
       // Process each athlete in this team's statistics
       stats.athletes.forEach(athleteData => {
         const athlete = athleteData.athlete;
+        if (!athlete) {
+          return;
+        }
+        
         const playerStats = athleteData.stats || [];
 
         // Map stats array to object using keys
@@ -866,8 +967,7 @@ class GameTransformer {
         });
 
         allPlayers.push({
-          teamId: team.id,
-          teamAbbreviation: team.abbreviation,
+          teamId: String(team.id), // Keep teamId for filtering, but use standardized team reference
           athleteId: athlete?.id,
           name: athlete?.displayName || athlete?.shortName || '',
           shortName: athlete?.shortName || '',
@@ -899,7 +999,8 @@ class GameTransformer {
 
     // Separate players by team and by starter/bench
     const transformedTeams = teams.map(team => {
-      const teamPlayers = allPlayers.filter(p => String(p.teamId) === String(team.teamId));
+      // Match players to team using teamId (from player) vs id (from transformed team)
+      const teamPlayers = allPlayers.filter(p => String(p.teamId) === String(team.id));
       const starters = teamPlayers.filter(p => p.starter && !p.didNotPlay);
       const bench = teamPlayers.filter(p => !p.starter && !p.didNotPlay);
       const didNotPlay = teamPlayers.filter(p => p.didNotPlay);
@@ -915,10 +1016,11 @@ class GameTransformer {
     // Pre-calculate top performers for each team (with team info included)
     const teamsWithTopPerformers = transformedTeams.map(team => {
       const allTeamPlayers = [...(team.starters || []), ...(team.bench || [])];
+      // Use standardized team format for teamInfo
       const teamInfo = {
-        teamName: team.teamName,
-        teamLogo: team.teamLogo,
-        teamAbbreviation: team.teamAbbreviation
+        name: team.name,
+        logo: team.logo,
+        abbreviation: team.abbreviation
       };
       return {
         ...team,
@@ -939,7 +1041,7 @@ class GameTransformer {
         teamScore = parseInt(boxscoreTeam.score, 10);
       } else {
         // Calculate total team score from player points
-        const teamPlayers = allPlayers.filter(p => String(p.teamId) === String(team.teamId));
+        const teamPlayers = allPlayers.filter(p => String(p.teamId) === String(team.id));
         teamScore = teamPlayers.reduce((sum, player) => {
           return sum + (parseInt(player.stats.points) || 0);
         }, 0);
@@ -969,8 +1071,6 @@ class GameTransformer {
 
     // Extract team statistics for Team Stats section
     const teamStatistics = this.extractTeamStatistics(boxscoreData, teamsWithTopPerformers);
-
-    console.log('teamStatistics', teamStatistics);
 
     return {
       teams: teamsWithTopPerformers,
@@ -1052,9 +1152,9 @@ class GameTransformer {
           position: player.position,
           headshot: player.headshot,
           teamId: player.teamId,
-          teamAbbreviation: player.teamAbbreviation,
-          teamName: playerTeam?.teamName || '',
-          teamLogo: playerTeam?.teamLogo || '',
+          teamAbbreviation: playerTeam?.abbreviation || '', // Use standardized 'abbreviation'
+          teamName: playerTeam?.name || '', // Use standardized 'name'
+          teamLogo: playerTeam?.logo || '',
           gis: Math.round(gis * 10) / 10, // Round to 1 decimal place
           stats: {
             points: player.stats.points || 0,
@@ -1078,7 +1178,23 @@ class GameTransformer {
    * @returns {Object|null} Team statistics for both teams
    */
   extractTeamStatistics(boxscoreData, teams) {
-    if (!boxscoreData?.teams || !teams || teams.length < 2) return null;
+    if (!boxscoreData?.teams) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[extractTeamStatistics] Missing boxscoreData.teams');
+      }
+      return null;
+    }
+    
+    if (!teams || teams.length < 2) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[extractTeamStatistics] Invalid teams array:', {
+          hasTeams: !!teams,
+          teamsLength: teams?.length,
+          teamsType: typeof teams
+        });
+      }
+      return null;
+    }
 
     const extractTeamStats = (boxscoreTeam, transformedTeam) => {
       // Try to get stats from boxscore team statistics first
@@ -1165,11 +1281,12 @@ class GameTransformer {
         });
       }
 
+      // Use standardized team format
       return {
-        teamId: transformedTeam.teamId,
-        teamName: transformedTeam.teamName,
-        teamAbbreviation: transformedTeam.teamAbbreviation,
-        teamLogo: transformedTeam.teamLogo,
+        teamId: transformedTeam.id || transformedTeam.teamId, // Support both during migration
+        teamName: transformedTeam.name || transformedTeam.teamName, // Use standardized 'name'
+        teamAbbreviation: transformedTeam.abbreviation || transformedTeam.teamAbbreviation, // Use standardized 'abbreviation'
+        teamLogo: transformedTeam.logo || transformedTeam.teamLogo,
         fieldGoals: `${fgMade}-${fgAttempted}`,
         fieldGoalPercent: fgPercent,
         threePointers: `${threePTMade}-${threePTAttempted}`,
@@ -1195,10 +1312,26 @@ class GameTransformer {
       };
     };
 
-    const boxscoreTeam1 = boxscoreData.teams.find(t => String(t.team?.id) === String(teams[0].teamId));
-    const boxscoreTeam2 = boxscoreData.teams.find(t => String(t.team?.id) === String(teams[1].teamId));
+    // Match teams using id (standardized) or teamId (legacy)
+    const team1Id = teams[0].id || teams[0].teamId;
+    const team2Id = teams[1].id || teams[1].teamId;
+    
+    const boxscoreTeam1 = boxscoreData.teams.find(t => String(t.team?.id) === String(team1Id));
+    const boxscoreTeam2 = boxscoreData.teams.find(t => String(t.team?.id) === String(team2Id));
 
-    if (!boxscoreTeam1 || !boxscoreTeam2) return null;
+    if (!boxscoreTeam1 || !boxscoreTeam2) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[extractTeamStatistics] Failed to match teams:', {
+          team1Id,
+          team2Id,
+          foundTeam1: !!boxscoreTeam1,
+          foundTeam2: !!boxscoreTeam2,
+          boxscoreTeamIds: boxscoreData.teams.map(t => t.team?.id),
+          transformedTeamIds: teams.map(t => t.id || t.teamId)
+        });
+      }
+      return null;
+    }
 
     return {
       team1: extractTeamStats(boxscoreTeam1, teams[0]),
@@ -1234,8 +1367,9 @@ class GameTransformer {
       return null;
     }
 
-    const awayTeamId = String(currentGame?.awayTeam?.teamId);
-    const homeTeamId = String(currentGame?.homeTeam?.teamId);
+    // Support both old and new team ID formats during migration
+    const awayTeamId = String(currentGame?.awayTeam?.id || currentGame?.awayTeam?.teamId);
+    const homeTeamId = String(currentGame?.homeTeam?.id || currentGame?.homeTeam?.teamId);
 
     // Extract series score from seriesScore string (e.g., "1-1")
     // Note: We'll calculate the actual score from game results for accuracy
@@ -1391,9 +1525,9 @@ class GameTransformer {
       const ftPercent = ftAttempted > 0 ? (ftMade / ftAttempted) * 100 : 0;
 
       return {
-        teamId: team.teamId,
-        teamName: team.teamName,
-        teamAbbreviation: team.teamAbbreviation,
+        teamId: team.id || team.teamId, // Support both formats
+        teamName: team.name || team.teamName, // Support both formats
+        teamAbbreviation: team.abbreviation || team.teamAbbreviation, // Support both formats
         fgMade,
         fgAttempted,
         fgPercent: Math.round(fgPercent * 10) / 10,
@@ -1558,8 +1692,9 @@ class GameTransformer {
       return null;
     }
 
-    const awayTeamId = String(currentGame?.awayTeam?.teamId);
-    const homeTeamId = String(currentGame?.homeTeam?.teamId);
+    // Support both old and new team ID formats during migration
+    const awayTeamId = String(currentGame?.awayTeam?.id || currentGame?.awayTeam?.teamId);
+    const homeTeamId = String(currentGame?.homeTeam?.id || currentGame?.homeTeam?.teamId);
     const gameStarted = currentGame?.gameStatus === 2 || currentGame?.gameStatus === 3;
 
     const injuries = {

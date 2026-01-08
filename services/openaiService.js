@@ -26,7 +26,7 @@ class OpenAIService {
     }
 
     const prompt = this.buildAnalysisPrompt(gameFacts);
-console.log('step 1 prompt', prompt);
+
     try {
       const response = await axios.post(
         `${this.baseURL}/chat/completions`,
@@ -80,7 +80,7 @@ console.log('step 1 prompt', prompt);
     }
 
     const prompt = this.buildSummaryPrompt(analysis);
-console.log('step 2 prompt', prompt);
+
     try {
       const response = await axios.post(
         `${this.baseURL}/chat/completions`,
@@ -112,7 +112,7 @@ console.log('step 2 prompt', prompt);
       if (!summary) {
         throw new Error('Empty response from OpenAI');
       }
-console.log('step 2 summary', summary);
+
       return summary;
     } catch (error) {
       console.error('OpenAI summary error:', error.response?.data || error.message);
@@ -129,7 +129,6 @@ console.log('step 2 summary', summary);
     try {
       // Step 1: Analyze data and get JSON
       const analysis = await this.analyzeGameData(gameFacts);
-      console.log('step 1 analysis', analysis);
       
       // Step 2: Generate summary from analysis
       const summary = await this.generateSummaryFromAnalysis(analysis);
@@ -147,7 +146,6 @@ console.log('step 2 summary', summary);
    * @returns {string} Formatted prompt
    */
   buildAnalysisPrompt(gameFacts) {
-    console.log('gameFacts', gameFacts);
     const {
       home_team,
       away_team,

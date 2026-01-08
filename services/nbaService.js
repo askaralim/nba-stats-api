@@ -4,6 +4,7 @@
  */
 
 const gameTransformer = require('../utils/gameTransformer');
+const { fetchWithRetry } = require('../utils/retry');
 
 class NBAService {
   constructor() {
@@ -72,11 +73,18 @@ class NBAService {
 
     try {
       const url = `${this.baseUrl}/scoreboard?dates=${espnDate}`;
-      const response = await fetch(url, {
+      
+      // Use retry logic with exponential backoff for transient failures
+      const response = await fetchWithRetry(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
           'Accept': 'application/json'
-        }
+        },
+        timeout: 30000 // 30 seconds
+      }, {
+        maxRetries: 2, // Retry up to 2 times (3 total attempts)
+        initialDelay: 1000,
+        maxDelay: 5000
       });
       
       if (!response.ok) {
@@ -93,6 +101,12 @@ class NBAService {
 
       return data;
     } catch (error) {
+      // If all retries failed and we have cached data, return it
+      if (cached && (error.name === 'AbortError' || error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.cause?.code === 'UND_ERR_CONNECT_TIMEOUT')) {
+        console.warn(`Scoreboard fetch failed for ${espnDate} after retries, returning cached data`);
+        return cached.data;
+      }
+      
       console.error('Error fetching scoreboard:', error);
       throw error;
     }
@@ -173,11 +187,18 @@ class NBAService {
 
     try {
       const url = `https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/summary?region=us&lang=en&contentorigin=espn&event=${gameId}`;
-      const response = await fetch(url, {
+      
+      // Use retry logic with exponential backoff for transient failures
+      const response = await fetchWithRetry(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
           'Accept': 'application/json'
-        }
+        },
+        timeout: 30000 // 30 seconds
+      }, {
+        maxRetries: 2, // Retry up to 2 times (3 total attempts)
+        initialDelay: 1000,
+        maxDelay: 5000
       });
       
       if (!response.ok) {
@@ -194,6 +215,12 @@ class NBAService {
 
       return data;
     } catch (error) {
+      // If all retries failed and we have cached data, return it
+      if (cached && (error.name === 'AbortError' || error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.cause?.code === 'UND_ERR_CONNECT_TIMEOUT')) {
+        console.warn(`Game summary fetch failed for ${gameId} after retries, returning cached data`);
+        return cached.data;
+      }
+      
       console.error('Error fetching game summary:', error);
       throw error;
     }
