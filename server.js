@@ -11,6 +11,8 @@ const gameTransformer = require('./utils/gameTransformer');
 // Middleware
 const corsMiddleware = require('./middleware/cors');
 const { standardRateLimiter, strictRateLimiter } = require('./middleware/rateLimiter');
+const { performanceMiddleware, requestIdMiddleware } = require('./middleware/performance');
+const { paginationMiddleware } = require('./middleware/pagination');
 const {
   validateGameId,
   validateDate,
@@ -47,6 +49,10 @@ class WebServer {
 
     // Trust proxy for accurate IP addresses (important for rate limiting)
     this.app.set('trust proxy', 1);
+
+    // Performance monitoring (must be early to track all requests)
+    this.app.use(performanceMiddleware);
+    this.app.use(requestIdMiddleware);
 
     // CORS middleware (supports web and mobile)
     this.app.use(corsMiddleware);
@@ -155,6 +161,12 @@ class WebServer {
       sendSuccess(res, { message: 'Welcome to NBA Stats Demo API' });
     });
 
+    // Mount v1 API routes (new versioned API)
+    const v1Routes = require('./routes/v1');
+    this.app.use('/api/v1', v1Routes);
+
+    // Legacy routes (deprecated, kept for backward compatibility)
+    // These routes still work but clients should migrate to /api/v1/*
     // Get games for a specific date (defaults to today)
     this.app.get('/api/nba/games/today',
       validateDate,

@@ -47,14 +47,24 @@ class TimeoutError extends AppError {
  * @param {*} data - Response data
  * @param {string} message - Optional success message
  * @param {number} statusCode - HTTP status code (default: 200)
+ * @param {Object} options - Additional options (pagination, version, etc.)
  */
-const sendSuccess = (res, data, message = null, statusCode = 200) => {
+const sendSuccess = (res, data, message = null, statusCode = 200, options = {}) => {
   const response = {
     success: true,
     data,
     ...(message && { message }),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    meta: {
+      version: options.version || 'v1',
+      ...(res.locals?.requestId && { requestId: res.locals.requestId }),
+      ...(options.pagination && { pagination: options.pagination })
+    }
   };
+  
+  // Set version header
+  res.setHeader('X-API-Version', options.version || 'v1');
+  
   return res.status(statusCode).json(response);
 };
 

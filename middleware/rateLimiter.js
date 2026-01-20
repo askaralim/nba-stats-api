@@ -92,7 +92,7 @@ const getClientIP = (req) => {
  */
 const createRateLimiter = (options = {}) => {
   const {
-    maxRequests = 100,
+    maxRequests = 180,
     windowMs = 15 * 60 * 1000, // 15 minutes
     message = 'Too many requests, please try again later'
   } = options;
