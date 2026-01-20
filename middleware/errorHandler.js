@@ -120,6 +120,11 @@ const sendError = (res, error) => {
  * Should be used as the last middleware in Express app
  */
 const errorHandler = (err, req, res, next) => {
+  // Skip logging for favicon requests (browsers auto-request this)
+  if (req.path === '/favicon.ico') {
+    return res.status(204).end();
+  }
+  
   // Log error for debugging
   console.error('[Error Handler]', {
     path: req.path,

@@ -131,10 +131,12 @@ const standardRateLimiter = createRateLimiter({
 });
 
 /**
- * Strict rate limiter for expensive operations (20 requests per 15 minutes)
+ * Strict rate limiter for expensive operations (150 requests per 15 minutes)
+ * Increased from 20 to 150 since AI summaries are cached for 7 days and
+ * responses are cached for 5 minutes, making most requests cache hits
  */
 const strictRateLimiter = createRateLimiter({
-  maxRequests: 20,
+  maxRequests: 150,
   windowMs: 15 * 60 * 1000,
   message: 'Too many requests for this resource, please try again later'
 });

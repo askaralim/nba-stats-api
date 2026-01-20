@@ -7,6 +7,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
+const dateFormatter = require('../utils/dateFormatter');
 
 class NewsService {
   constructor() {
@@ -452,6 +453,12 @@ class NewsService {
                 timestamp = new Date().toISOString();
               }
               
+              // Format timestamp for display (Chinese locale by default)
+              const timestampFormatted = dateFormatter.formatNewsTimestamp(
+                timestamp, 
+                { locale: 'zh-CN', timezone: 'Asia/Shanghai' }
+              );
+              
               return {
                 id: `${username}_${Date.now()}_${index}`,
                 author: author,
@@ -461,7 +468,8 @@ class NewsService {
                 images: tweet.images || [],
                 imageLinks: tweet.imageLinks || [], // Full-size image links
                 link: tweet.link,
-                timestamp: timestamp
+                timestamp: timestamp, // Keep ISO for backward compatibility
+                timestampFormatted: timestampFormatted // Formatted timestamp for display
               };
             });
 

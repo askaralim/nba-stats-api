@@ -30,6 +30,11 @@ const {
   ExternalAPIError
 } = require('../middleware/errorHandler');
 
+// Response cache for endpoint-level caching (reusable across all endpoints)
+// Usage: responseCache.get(cacheKey, ttlMs) / responseCache.set(cacheKey, data, ttlMs)
+// Example: const cached = responseCache.get(`game_${gameId}`, 60 * 1000); // 1 min cache
+const responseCache = require('../services/responseCache');
+
 // Apply pagination middleware to all list endpoints
 router.use('/nba/games/today', paginationMiddleware);
 router.use('/nba/stats/players', paginationMiddleware);
@@ -102,6 +107,15 @@ router.get('/nba/games/:gameId',
   validateGameId,
   asyncHandler(async (req, res) => {
     const { gameId } = req.params;
+    
+    // Check response cache first (10 seconds for live games, 5 minutes for finished)
+    const cacheKey = `game_details_${gameId}`;
+    const cachedResponse = responseCache.get(cacheKey, 10 * 1000); // 10 seconds default
+    
+    if (cachedResponse) {
+      return sendSuccess(res, cachedResponse, null, 200, { version: 'v1' });
+    }
+    
     const [gameData, summaryData] = await Promise.all([
       nbaService.getGameDetails(gameId),
       nbaService.getGameSummary(gameId).catch(() => null)
@@ -124,6 +138,10 @@ router.get('/nba/games/:gameId',
       }
     }
     
+    // Cache response: shorter TTL for live games, longer for finished games
+    const ttl = transformed.gameStatus === 3 ? 5 * 60 * 1000 : 10 * 1000; // 5 min for finished, 10s for live
+    responseCache.set(cacheKey, transformed, ttl);
+    
     sendSuccess(res, transformed, null, 200, { version: 'v1' });
   })
 );
@@ -134,6 +152,14 @@ router.get('/nba/games/:gameId/summary',
   strictRateLimiter,
   asyncHandler(async (req, res) => {
     const { gameId } = req.params;
+    
+    // Check response cache first (5 minute TTL for finished games)
+    const cacheKey = `game_summary_${gameId}`;
+    const cachedResponse = responseCache.get(cacheKey, 5 * 60 * 1000); // 5 minutes
+    
+    if (cachedResponse) {
+      return sendSuccess(res, cachedResponse, null, 200, { version: 'v1' });
+    }
     
     const gameData = await nbaService.getGameDetails(gameId);
     const transformed = gameTransformer.transformGame(gameData);
@@ -211,6 +237,9 @@ router.get('/nba/games/:gameId/summary',
         throw new ExternalAPIError('Unable to compute game facts and no fallback available');
       }
     }
+    
+    // Cache the response for 5 minutes
+    responseCache.set(cacheKey, aiSummary, 5 * 60 * 1000);
     
     sendSuccess(res, aiSummary, null, 200, { version: 'v1' });
   })
@@ -448,8 +477,8 @@ router.get('/nba/teams/:teamAbbreviation/recent-games',
   })
 );
 
-// Get home page data
-router.get('/nba/home',
+// Get today's top performers (from scoreboard leaders)
+router.get('/nba/todayTopPerformers',
   asyncHandler(async (req, res) => {
     const { date } = req.query;
     
@@ -457,7 +486,7 @@ router.get('/nba/home',
     try {
       todayTopPerformers = await nbaService.getTodayTopPerformers(date);
     } catch (error) {
-      console.error('Error fetching today top performers, using empty result:', error.message);
+      console.error('Error fetching today top performers:', error.message);
       todayTopPerformers = {
         points: [],
         rebounds: [],
@@ -465,6 +494,13 @@ router.get('/nba/home',
       };
     }
     
+    sendSuccess(res, todayTopPerformers, null, 200, { version: 'v1' });
+  })
+);
+
+// Get season leaders (top 3 in points, rebounds, assists)
+router.get('/nba/seasonLeaders',
+  asyncHandler(async (req, res) => {
     const seasonLeaders = await espnScraperService.getPlayerStats({
       season: '2026|2',
       limit: 100,
@@ -501,10 +537,7 @@ router.get('/nba/home',
       }))
     };
     
-    sendSuccess(res, {
-      todayTopPerformers: todayTopPerformers,
-      seasonLeaders: topSeasonLeaders
-    }, null, 200, { version: 'v1' });
+    sendSuccess(res, topSeasonLeaders, null, 200, { version: 'v1' });
   })
 );
 

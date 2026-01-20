@@ -3,6 +3,8 @@
  * Fetches team data and statistics from ESPN API endpoints
  */
 
+const dateFormatter = require('../utils/dateFormatter');
+
 class TeamService {
   constructor() {
     this.baseUrl = 'https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams';
@@ -369,6 +371,9 @@ class TeamService {
           return {
             id: event.id,
             date: event.date,
+            dateFormatted: event.date 
+              ? dateFormatter.formatScheduleDate(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+              : null,
             homeTeam: {
               name: homeTeam?.team?.displayName || homeTeam?.team?.name || 'Unknown',
               abbreviation: homeTeam?.team?.abbreviation || '',
@@ -401,6 +406,9 @@ class TeamService {
           return {
             id: event.id,
             date: event.date,
+            dateFormatted: event.date 
+              ? dateFormatter.formatScheduleDate(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+              : null,
             homeTeam: {
               name: homeTeam?.team?.displayName || homeTeam?.team?.name || 'Unknown',
               abbreviation: homeTeam?.team?.abbreviation || ''

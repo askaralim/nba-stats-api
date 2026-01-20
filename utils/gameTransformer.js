@@ -3,6 +3,8 @@
  * Transforms ESPN API response to simplified format for frontend
  */
 
+const dateFormatter = require('./dateFormatter');
+
 class GameTransformer {
   /**
    * Map ESPN status to internal status code
@@ -52,11 +54,17 @@ class GameTransformer {
     const awayTeam = game.awayTeam ? this.createStandardTeam(game.awayTeam) : null;
     const homeTeam = game.homeTeam ? this.createStandardTeam(game.homeTeam) : null;
 
+    // Format game time for minimized games
+    const gameEtFormatted = game.gameEt 
+      ? dateFormatter.formatGameTimeForDisplay(game.gameEt, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+      : null;
+
     return {
       gameId: game.gameId,
       gameStatus: game.gameStatus,
       gameStatusText: game.gameStatusText,
       gameEt: game.gameEt,
+      gameEtFormatted: gameEtFormatted, // Formatted date for display
       period: game.period,
       // Filter flags for frontend filtering
       isOvertime,
@@ -401,6 +409,11 @@ class GameTransformer {
       gameStatus = this.mapStatus(statusType.name);
     }
 
+    // Format game time for display (Chinese locale by default)
+    const gameEtFormatted = event.date 
+      ? dateFormatter.formatGameTimeForDisplay(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+      : null;
+
     const transformedGame = {
       gameId: event.id,
       gameCode: event.shortName || '',
@@ -410,6 +423,7 @@ class GameTransformer {
       gameClock: status.displayClock || '',
       gameTimeGMT: event.date ? this.formatGameTime(event.date) : null,
       gameEt: event.date || null,
+      gameEtFormatted: gameEtFormatted, // Formatted date for display
       homeTeam: this.transformTeam(homeCompetitor),
       awayTeam: this.transformTeam(awayCompetitor),
       gameLeaders: this.extractGameLeaders(competition.competitors)
@@ -1420,9 +1434,15 @@ class GameTransformer {
           }
         }
 
+        // Format date for season series games
+        const dateFormatted = event.date 
+          ? dateFormatter.formatScheduleDate(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+          : null;
+
         games.push({
           gameId: event.id,
           date: event.date,
+          dateFormatted: dateFormatted,
           isCompleted: isCompleted,
           awayTeam: {
             id: gameAwayTeamId,

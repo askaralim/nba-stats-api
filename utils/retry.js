@@ -25,7 +25,14 @@ async function retryWithBackoff(fn, options = {}) {
       if (error.name === 'AbortError' || error.name === 'TimeoutError') {
         return true;
       }
-      if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+      // Check error code (including undici-specific codes)
+      if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || 
+          error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.code === 'UND_ERR_SOCKET') {
+        return true;
+      }
+      // Check error cause (for nested errors)
+      if (error.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' || error.cause?.code === 'UND_ERR_SOCKET' ||
+          error.cause?.code === 'ECONNRESET' || error.cause?.code === 'ETIMEDOUT') {
         return true;
       }
       if (error.response?.status >= 500 && error.response?.status < 600) {

@@ -166,6 +166,17 @@ class NBAService {
 
       return event;
     } catch (error) {
+      // If all retries failed and we have cached data (even if expired), return it
+      const isTimeoutError = error.name === 'AbortError' || 
+                             error.code === 'UND_ERR_CONNECT_TIMEOUT' || 
+                             error.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' ||
+                             error.message?.includes('timeout');
+      
+      if (isTimeoutError && cached) {
+        console.warn(`Game details fetch failed for ${gameId} after retries, returning cached data (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+        return cached.data;
+      }
+      
       console.error('Error fetching game details:', error);
       throw error;
     }
@@ -243,15 +254,9 @@ class NBAService {
 
     try {
       const scoreboardData = await this.getScoreboard(dateStr);
-      const games = scoreboardData.events || [];
+      const events = scoreboardData.events || [];
       
-      // Filter completed games
-      const completedGames = games.filter(game => {
-        const status = game.status?.type?.name;
-        return status === 'STATUS_FINAL';
-      });
-
-      if (completedGames.length === 0) {
+      if (events.length === 0) {
         const emptyResult = {
           points: [],
           rebounds: [],
@@ -264,67 +269,90 @@ class NBAService {
         return emptyResult;
       }
 
-      // Fetch boxscores for all completed games
-      const boxscorePromises = completedGames.map(game => 
-        this.getGameSummary(game.id).catch(() => null)
-      );
+      // Extract all players from leaders in scoreboard data
+      // Works for both completed AND in-progress games!
+      const allPlayers = new Map(); // Use Map to deduplicate by player ID
       
-      const boxscores = await Promise.all(boxscorePromises);
-      
-      // Extract all players from all games using gameTransformer
-      const allPlayers = [];
-      
-      boxscores.forEach((boxscore, index) => {
-        if (!boxscore?.boxscore) return;
+      events.forEach(event => {
+        const competition = event.competitions?.[0];
+        if (!competition?.competitors) return;
         
-        // Use gameTransformer to transform boxscore
-        const transformedBoxscore = gameTransformer.transformBoxscore(boxscore.boxscore);
-        
-        if (!transformedBoxscore?.teams) return;
-        
-        transformedBoxscore.teams.forEach(team => {
-          const teamName = team.teamName || '';
-          const teamAbbreviation = team.teamAbbreviation || '';
+        competition.competitors.forEach(competitor => {
+          const teamName = competitor.team?.displayName || competitor.team?.name || '';
+          const teamAbbreviation = competitor.team?.abbreviation || '';
           
-          // Process all players (starters + bench)
-          const players = [
-            ...(team.starters || []),
-            ...(team.bench || [])
-          ];
+          // Extract leaders (top performers) for this team
+          // Structure: leaders is an array of stat categories (points, rebounds, assists, etc.)
+          // Each category has a nested leaders array with athlete and value
+          const statCategories = competitor.leaders || [];
           
-          players.forEach(player => {
-            if (!player?.athleteId || !player?.stats) return;
+          statCategories.forEach(category => {
+            const categoryName = category.name?.toLowerCase();
+            if (!categoryName || !category.leaders || !Array.isArray(category.leaders)) return;
             
-            const points = parseInt(player.stats.points) || 0;
-            const rebounds = parseInt(player.stats.rebounds) || 0;
-            const assists = parseInt(player.stats.assists) || 0;
-            
-            if (points > 0 || rebounds > 0 || assists > 0) {
-              allPlayers.push({
-                id: player.athleteId,
-                name: player.name || '',
-                team: teamName,
-                teamAbbreviation: teamAbbreviation,
-                headshot: player.headshot || null,
-                points: points,
-                rebounds: rebounds,
-                assists: assists
-              });
-            }
+            // Process each leader in this category
+            category.leaders.forEach(leader => {
+              const athlete = leader.athlete;
+              if (!athlete?.id) return;
+              
+              const statValue = parseInt(leader.displayValue || leader.value || 0);
+              
+              // Update or create player entry
+              const playerId = athlete.id;
+              if (allPlayers.has(playerId)) {
+                const existing = allPlayers.get(playerId);
+                // Update the stat for this category
+                if (categoryName === 'points') {
+                  existing.points = Math.max(existing.points, statValue);
+                } else if (categoryName === 'rebounds') {
+                  existing.rebounds = Math.max(existing.rebounds, statValue);
+                } else if (categoryName === 'assists') {
+                  existing.assists = Math.max(existing.assists, statValue);
+                }
+              } else {
+                // Create new player entry
+                const player = {
+                  id: playerId,
+                  name: athlete.fullName || athlete.displayName || athlete.shortName || '',
+                  team: teamName,
+                  teamAbbreviation: teamAbbreviation,
+                  headshot: athlete.headshot?.href || athlete.headshot || null,
+                  points: 0,
+                  rebounds: 0,
+                  assists: 0
+                };
+                
+                // Set the stat value for this category
+                if (categoryName === 'points') {
+                  player.points = statValue;
+                } else if (categoryName === 'rebounds') {
+                  player.rebounds = statValue;
+                } else if (categoryName === 'assists') {
+                  player.assists = statValue;
+                }
+                
+                allPlayers.set(playerId, player);
+              }
+            });
           });
         });
       });
 
-      // Get top 3 for each category
-      const topPoints = [...allPlayers]
+      // Convert Map to Array and get top 3 for each category
+      const playersArray = Array.from(allPlayers.values());
+      
+      const topPoints = [...playersArray]
+        .filter(p => p.points > 0)
         .sort((a, b) => b.points - a.points)
         .slice(0, 3);
       
-      const topRebounds = [...allPlayers]
+      const topRebounds = [...playersArray]
+        .filter(p => p.rebounds > 0)
         .sort((a, b) => b.rebounds - a.rebounds)
         .slice(0, 3);
       
-      const topAssists = [...allPlayers]
+      const topAssists = [...playersArray]
+        .filter(p => p.assists > 0)
         .sort((a, b) => b.assists - a.assists)
         .slice(0, 3);
 
