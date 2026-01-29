@@ -29,6 +29,7 @@ const {
   ValidationError,
   ExternalAPIError
 } = require('../middleware/errorHandler');
+const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 
 // Response cache for endpoint-level caching (reusable across all endpoints)
 // Usage: responseCache.get(cacheKey, ttlMs) / responseCache.set(cacheKey, data, ttlMs)
@@ -356,6 +357,7 @@ router.get('/nba/teams/:teamAbbreviation',
               id: playerId,
               name: athlete.fullName || athlete.displayName || athlete.shortName || 'Unknown',
               position: athlete.position?.abbreviation || athlete.position?.name || '-',
+              headshot: athlete.headshot?.href || null,
               stats: {}
             });
           }
@@ -380,6 +382,7 @@ router.get('/nba/teams/:teamAbbreviation',
         id: player.id,
         name: player.name,
         position: player.position,
+        headshot: player.headshot,
         gamesPlayed: player.stats.gamesPlayed || '-',
         gamesStarted: player.stats.gamesStarted || '-',
         avgMinutes: player.stats.avgMinutes || '-',
@@ -398,10 +401,19 @@ router.get('/nba/teams/:teamAbbreviation',
       players.push(...flattenedPlayers);
     }
     
+    // Extract team name and city from displayName
+    const displayName = teamInfo.displayName || `${teamInfo.location} ${teamInfo.name}`;
+    const parts = displayName.split(' ');
+    const city = parts.slice(0, -1).join(' ') || teamInfo.location || '';
+    const name = parts[parts.length - 1] || displayName;
+
     sendSuccess(res, {
       team: {
         id: teamInfo.id,
-        name: teamInfo.displayName || `${teamInfo.location} ${teamInfo.name}`,
+        name: name,
+        nameZhCN: getTeamNameZhCn(name), // Chinese team name (Simplified Chinese, zh-CN)
+        city: city,
+        cityZhCN: getTeamCityZhCn(city), // Chinese city name (Simplified Chinese, zh-CN)
         abbreviation: teamInfo.abbreviation,
         logo: teamInfo.logos?.[0]?.href || null,
         record: teamStats.team?.recordSummary || null,
@@ -422,18 +434,24 @@ router.get('/nba/teams/:teamAbbreviation/schedule',
     const { seasontype = '2' } = req.query;
     const pagination = req.pagination;
     
-    const scheduleData = await teamService.getTeamSchedule(teamAbbreviation, parseInt(seasontype));
+    // getTeamSchedule now returns transformed array directly
+    const scheduleEvents = await teamService.getTeamSchedule(teamAbbreviation, parseInt(seasontype));
     
-    // Paginate schedule if it's an array
-    if (Array.isArray(scheduleData)) {
-      const paginated = paginateArray(scheduleData, pagination);
-      sendSuccess(res, paginated.data, null, 200, {
-        version: 'v1',
-        pagination: paginated.meta.pagination
-      });
-    } else {
-      sendSuccess(res, scheduleData, null, 200, { version: 'v1' });
+    // Ensure it's an array (should always be, but defensive check)
+    if (!Array.isArray(scheduleEvents)) {
+      throw new NotFoundError('Schedule data');
     }
+    
+    // Paginate schedule events
+    const paginated = paginateArray(scheduleEvents, pagination);
+    
+    // Return as events array for iOS compatibility (iOS expects { events: [...] })
+    sendSuccess(res, {
+      events: paginated.data
+    }, null, 200, {
+      version: 'v1',
+      pagination: paginated.meta.pagination
+    });
   })
 );
 
@@ -549,7 +567,7 @@ router.get('/nba/news',
     const pagination = req.pagination;
     
     const tweets = await newsService.getShamsTweets(forceRefresh);
-    
+    console.log('tweets', tweets);
     // Paginate tweets
     const paginated = paginateArray(tweets, pagination);
     

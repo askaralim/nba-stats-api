@@ -4,6 +4,7 @@
  */
 
 const dateFormatter = require('./dateFormatter');
+const { getTeamNameZhCn, getTeamCityZhCn } = require('./teamTranslations');
 
 class GameTransformer {
   /**
@@ -18,7 +19,7 @@ class GameTransformer {
       'STATUS_FINAL': 3,
       'STATUS_FINAL_OVERTIME': 3,
       'STATUS_DELAYED': 1,
-      'STATUS_POSTPONED': 1,
+      'STATUS_POSTPONED': 6,
       'STATUS_SUSPENDED': 2,
       'STATUS_HALFTIME': 2,
       'STATUS_END_PERIOD': 2
@@ -73,7 +74,9 @@ class GameTransformer {
       awayTeam: awayTeam ? {
         id: awayTeam.id,
         name: awayTeam.name,
+        nameZhCN: awayTeam.nameZhCN,
         city: awayTeam.city,
+        cityZhCN: awayTeam.cityZhCN,
         abbreviation: awayTeam.abbreviation,
         logo: awayTeam.logo,
         wins: awayTeam.wins,
@@ -83,7 +86,9 @@ class GameTransformer {
       homeTeam: homeTeam ? {
         id: homeTeam.id,
         name: homeTeam.name,
+        nameZhCN: homeTeam.nameZhCN,
         city: homeTeam.city,
+        cityZhCN: homeTeam.cityZhCN,
         abbreviation: homeTeam.abbreviation,
         logo: homeTeam.logo,
         wins: homeTeam.wins,
@@ -106,7 +111,7 @@ class GameTransformer {
     if (!awayAbbr || !homeAbbr) return false;
     
     // Any game involving GSW is a marquee matchup
-    if (awayAbbr === 'GS' || homeAbbr === 'GS') {
+    if (awayAbbr === 'GS' || homeAbbr === 'GS' || awayAbbr === 'LAL' || homeAbbr === 'LAL' || awayAbbr === 'HOU' || homeAbbr === 'HOU') {
       return true;
     }
     
@@ -535,10 +540,16 @@ class GameTransformer {
       return null;
     }
 
+    // Get Chinese translations
+    const nameZhCN = getTeamNameZhCn(name);
+    const cityZhCN = getTeamCityZhCn(city);
+
     return {
       id: teamId,
       name: name,
+      nameZhCN: nameZhCN, // Chinese team name (Simplified Chinese, zh-CN)
       city: city,
+      cityZhCN: cityZhCN, // Chinese city name (Simplified Chinese, zh-CN)
       abbreviation: abbreviation, // ALWAYS use 'abbreviation' (not teamTricode, teamAbbreviation)
       logo: logo,
       wins: options.wins !== undefined ? options.wins : (teamData.wins !== undefined ? teamData.wins : null),

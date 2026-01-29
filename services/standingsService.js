@@ -3,6 +3,8 @@
  * Fetches team standings from ESPN API
  */
 
+const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+
 class StandingsService {
   constructor() {
     this.baseUrl = 'https://site.web.api.espn.com/apis/v2/sports/basketball/nba/standings';
@@ -56,10 +58,19 @@ class StandingsService {
     const gamesBehind = this.getStatValue(stats, 'gamesBehind');
     const streakType = stats.find(s => s.name === 'streak')?.displayValue || null;
 
+    // Extract team name and city from displayName (e.g., "Los Angeles Lakers" -> city: "Los Angeles", name: "Lakers")
+    const displayName = team.displayName || '';
+    const parts = displayName.split(' ');
+    const city = parts.slice(0, -1).join(' ') || team.location || '';
+    const name = parts[parts.length - 1] || displayName;
+
     return {
       id: team.id,
       uid: team.uid,
-      name: team.displayName,
+      name: name,
+      nameZhCN: getTeamNameZhCn(name), // Chinese team name (Simplified Chinese, zh-CN)
+      city: city,
+      cityZhCN: getTeamCityZhCn(city), // Chinese city name (Simplified Chinese, zh-CN)
       shortName: team.shortDisplayName,
       abbreviation: team.abbreviation,
       location: team.location,

@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression');
 const cron = require('node-cron');
 const nbaService = require('./services/nbaService');
 const espnScraperService = require('./services/espnScraperService');
@@ -41,6 +42,21 @@ class WebServer {
   }
 
   setupMiddleware() {
+    // Gzip compression (should be early to compress all responses)
+    // Compresses responses > 1KB, filters out already compressed content
+    this.app.use(compression({
+      filter: (req, res) => {
+        // Don't compress if client doesn't support it
+        if (req.headers['x-no-compression']) {
+          return false;
+        }
+        // Use compression filter function
+        return compression.filter(req, res);
+      },
+      level: 6, // Compression level (1-9, 6 is a good balance)
+      threshold: 1024 // Only compress responses > 1KB
+    }));
+
     // Parse JSON bodies
     this.app.use(express.json());
     

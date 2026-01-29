@@ -4,6 +4,7 @@
  */
 
 const dateFormatter = require('../utils/dateFormatter');
+const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 
 class TeamService {
   constructor() {
@@ -92,13 +93,13 @@ class TeamService {
   }
 
   /**
-   * Fetch team schedule
+   * Fetch team schedule (raw ESPN data)
    * @param {string} teamAbbreviation - Team abbreviation (e.g., 'bos', 'lal')
    * @param {number} seasonType - Season type (2 = regular season, 3 = playoffs)
-   * @returns {Promise<Object>} Team schedule data
+   * @returns {Promise<Object>} Raw ESPN schedule data
    */
-  async getTeamSchedule(teamAbbreviation, seasonType = 2) {
-    const cacheKey = `team_schedule_${teamAbbreviation}_${seasonType}`;
+  async getTeamScheduleRaw(teamAbbreviation, seasonType = 2) {
+    const cacheKey = `team_schedule_raw_${teamAbbreviation}_${seasonType}`;
     const cached = this.cache.get(cacheKey);
     
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
@@ -129,6 +130,99 @@ class TeamService {
       return data;
     } catch (error) {
       console.error(`Error fetching team schedule for ${teamAbbreviation}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transform team schedule to minimal format for frontend
+   * Returns only what's needed: gameId, date, status, teams, scores
+   * @param {string} teamAbbreviation - Team abbreviation (e.g., 'bos', 'lal')
+   * @param {number} seasonType - Season type (2 = regular season, 3 = playoffs)
+   * @returns {Promise<Array>} Transformed schedule events array
+   */
+  async getTeamSchedule(teamAbbreviation, seasonType = 2) {
+    const cacheKey = `team_schedule_${teamAbbreviation}_${seasonType}`;
+    const cached = this.cache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
+    }
+
+    try {
+      const scheduleData = await this.getTeamScheduleRaw(teamAbbreviation, seasonType);
+      const events = scheduleData.events || [];
+
+      // Transform events to minimal format
+      const transformedEvents = events.map(event => {
+        const competition = event.competitions?.[0];
+        if (!competition) return null;
+
+        const status = competition.status?.type || {};
+        const homeTeam = competition.competitors?.find(t => t?.homeAway === 'home');
+        const awayTeam = competition.competitors?.find(t => t?.homeAway === 'away');
+
+        // Extract score value
+        const getScoreValue = (scoreObj) => {
+          if (scoreObj === null || scoreObj === undefined) return null;
+          if (typeof scoreObj === 'number') return scoreObj;
+          if (typeof scoreObj === 'string') {
+            const parsed = parseInt(scoreObj, 10);
+            return isNaN(parsed) ? null : parsed;
+          }
+          if (typeof scoreObj === 'object') {
+            const value = scoreObj.displayValue || scoreObj.value;
+            if (value === null || value === undefined) return null;
+            const parsed = parseInt(value, 10);
+            return isNaN(parsed) ? null : parsed;
+          }
+          return null;
+        };
+
+        return {
+          id: event.id,
+          date: event.date,
+          dateFormatted: event.date 
+            ? dateFormatter.formatScheduleDate(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+            : null,
+          competitions: [{
+            status: {
+              type: {
+                completed: status.completed === true,
+                description: status.description || status.name || (status.completed ? 'Final' : 'Scheduled')
+              }
+            },
+            competitors: [
+              awayTeam ? {
+                homeAway: 'away',
+                team: {
+                  id: awayTeam.team?.id || '',
+                  abbreviation: awayTeam.team?.abbreviation || ''
+                },
+                score: getScoreValue(awayTeam.score)
+              } : null,
+              homeTeam ? {
+                homeAway: 'home',
+                team: {
+                  id: homeTeam.team?.id || '',
+                  abbreviation: homeTeam.team?.abbreviation || ''
+                },
+                score: getScoreValue(homeTeam.score)
+              } : null
+            ].filter(Boolean)
+          }]
+        };
+      }).filter(Boolean); // Remove null entries
+
+      // Cache the transformed result
+      this.cache.set(cacheKey, {
+        data: transformedEvents,
+        timestamp: Date.now()
+      });
+
+      return transformedEvents;
+    } catch (error) {
+      console.error(`Error transforming team schedule for ${teamAbbreviation}:`, error);
       throw error;
     }
   }
@@ -334,7 +428,7 @@ class TeamService {
     }
 
     try {
-      const scheduleData = await this.getTeamSchedule(teamAbbreviation, seasonType);
+      const scheduleData = await this.getTeamScheduleRaw(teamAbbreviation, seasonType);
       const events = scheduleData.events || [];
 
       // Helper to extract score value
@@ -368,6 +462,18 @@ class TeamService {
           const opponentScoreValue = getScoreValue(opponentScore);
           const won = teamScoreValue && opponentScoreValue ? parseInt(teamScoreValue) > parseInt(opponentScoreValue) : null;
 
+          // Extract team name and city for home team
+          const homeDisplayName = homeTeam?.team?.displayName || homeTeam?.team?.name || 'Unknown';
+          const homeParts = homeDisplayName.split(' ');
+          const homeCity = homeParts.slice(0, -1).join(' ') || '';
+          const homeName = homeParts[homeParts.length - 1] || homeDisplayName;
+
+          // Extract team name and city for away team
+          const awayDisplayName = awayTeam?.team?.displayName || awayTeam?.team?.name || 'Unknown';
+          const awayParts = awayDisplayName.split(' ');
+          const awayCity = awayParts.slice(0, -1).join(' ') || '';
+          const awayName = awayParts[awayParts.length - 1] || awayDisplayName;
+
           return {
             id: event.id,
             date: event.date,
@@ -375,12 +481,18 @@ class TeamService {
               ? dateFormatter.formatScheduleDate(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
               : null,
             homeTeam: {
-              name: homeTeam?.team?.displayName || homeTeam?.team?.name || 'Unknown',
+              name: homeName,
+              nameZhCN: getTeamNameZhCn(homeName),
+              city: homeCity,
+              cityZhCN: getTeamCityZhCn(homeCity),
               abbreviation: homeTeam?.team?.abbreviation || '',
               score: homeScore
             },
             awayTeam: {
-              name: awayTeam?.team?.displayName || awayTeam?.team?.name || 'Unknown',
+              name: awayName,
+              nameZhCN: getTeamNameZhCn(awayName),
+              city: awayCity,
+              cityZhCN: getTeamCityZhCn(awayCity),
               abbreviation: awayTeam?.team?.abbreviation || '',
               score: awayScore
             },
@@ -403,6 +515,18 @@ class TeamService {
           const homeTeam = teams.find(t => t?.homeAway === 'home');
           const awayTeam = teams.find(t => t?.homeAway === 'away');
 
+          // Extract team name and city for home team
+          const homeDisplayName = homeTeam?.team?.displayName || homeTeam?.team?.name || 'Unknown';
+          const homeParts = homeDisplayName.split(' ');
+          const homeCity = homeParts.slice(0, -1).join(' ') || '';
+          const homeName = homeParts[homeParts.length - 1] || homeDisplayName;
+
+          // Extract team name and city for away team
+          const awayDisplayName = awayTeam?.team?.displayName || awayTeam?.team?.name || 'Unknown';
+          const awayParts = awayDisplayName.split(' ');
+          const awayCity = awayParts.slice(0, -1).join(' ') || '';
+          const awayName = awayParts[awayParts.length - 1] || awayDisplayName;
+
           return {
             id: event.id,
             date: event.date,
@@ -410,11 +534,17 @@ class TeamService {
               ? dateFormatter.formatScheduleDate(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
               : null,
             homeTeam: {
-              name: homeTeam?.team?.displayName || homeTeam?.team?.name || 'Unknown',
+              name: homeName,
+              nameZhCN: getTeamNameZhCn(homeName),
+              city: homeCity,
+              cityZhCN: getTeamCityZhCn(homeCity),
               abbreviation: homeTeam?.team?.abbreviation || ''
             },
             awayTeam: {
-              name: awayTeam?.team?.displayName || awayTeam?.team?.name || 'Unknown',
+              name: awayName,
+              nameZhCN: getTeamNameZhCn(awayName),
+              city: awayCity,
+              cityZhCN: getTeamCityZhCn(awayCity),
               abbreviation: awayTeam?.team?.abbreviation || ''
             },
             status: competition?.status?.type?.description || 'Scheduled'
