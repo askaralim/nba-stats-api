@@ -32,6 +32,7 @@ class NewsService {
     // List of NBA news Twitter accounts to fetch from
     this.nbaNewsAccounts = [
       { username: 'ShamsCharania', author: 'Shams Charania', handle: '@ShamsCharania' },
+      { username: 'AnthonySlater', author: 'Anthony Slater', handle: '@anthonyVslater' },
       { username: 'TheSteinLine', author: 'Marc Stein', handle: '@TheSteinLine' },
       { username: 'ChrisBHaynes', author: 'Chris Haynes', handle: '@ChrisBHaynes' }
     ];
