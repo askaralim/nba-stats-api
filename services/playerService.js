@@ -3,6 +3,8 @@
  * Fetches player data, statistics, and advanced stats from ESPN API endpoints
  */
 
+const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+
 class PlayerService {
   constructor() {
     this.baseUrl = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes';
@@ -398,6 +400,9 @@ class PlayerService {
         team: athlete.team ? {
           id: athlete.team.id,
           name: athlete.team.displayName || `${athlete.team.location} ${athlete.team.name}`,
+          nameZhCN: getTeamNameZhCn(athlete.team.name),
+          city: athlete.team.location,
+          cityZhCN: getTeamCityZhCn(athlete.team.location),
           abbreviation: athlete.team.abbreviation,
           logo: athlete.team.logos?.[0]?.href || null
         } : null,

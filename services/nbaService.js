@@ -121,50 +121,39 @@ class NBAService {
   }
 
   /**
-   * Fetch game details by game ID
+   * Fetch game details by game ID (header + full summary in one call).
+   * Built on getGameSummary; returns normalized { event, summaryData } so callers
+   * get event (header) and full summary without a second request.
    * @param {string} gameId - Game ID
-   * @returns {Promise<Object>} Game details
+   * @returns {Promise<{ event: Object, summaryData: Object }>} event = summaryData.header, summaryData = full ESPN summary
    */
   async getGameDetails(gameId) {
     const cacheKey = `game_${gameId}`;
     const cached = this.cache.get(cacheKey);
     
-    // Cache game details for 30 seconds (shorter for live games)
+    // Cache game details for 30 seconds
     if (cached && Date.now() - cached.timestamp < 30000) {
       return cached.data;
     }
 
     try {
-      // Get scoreboard and find the game (try today first, then search recent dates if needed)
-      let scoreboard = await this.getTodaysScoreboard();
-      let event = scoreboard.events?.find(e => e.id === gameId);
-      
-      // If not found, try yesterday and tomorrow
-      if (!event) {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        scoreboard = await this.getScoreboard(yesterday);
-        event = scoreboard.events?.find(e => e.id === gameId);
+      const summaryData = await this.getGameSummary(gameId);
+      if (!summaryData || !summaryData.header) {
+        throw new Error(`Game ${gameId} not found in summary data`);
       }
-      
-      if (!event) {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        scoreboard = await this.getScoreboard(tomorrow);
-        event = scoreboard.events?.find(e => e.id === gameId);
-      }
-      
-      if (!event) {
-        throw new Error(`Game ${gameId} not found in today's scoreboard`);
+      // header is the event object (id, date, competitions, etc.) from summary API
+      const event = summaryData.header;
+      if (!event?.competitions?.[0]) {
+        throw new Error(`Game ${gameId} has no competition data in summary`);
       }
 
       // Cache the game
       this.cache.set(cacheKey, {
-        data: event,
+        data: { event, summaryData },
         timestamp: Date.now()
       });
 
-      return event;
+      return { event, summaryData };
     } catch (error) {
       // If all retries failed and we have cached data (even if expired), return it
       const isTimeoutError = error.name === 'AbortError' || 
@@ -183,9 +172,10 @@ class NBAService {
   }
 
   /**
-   * Fetch game summary (boxscore) by game ID
+   * Fetch raw game summary from ESPN (header, boxscore, etc.).
+   * Use getGameDetails when you need both event (header) and summary in one call.
    * @param {string} gameId - Game ID
-   * @returns {Promise<Object>} Game summary with boxscore data
+   * @returns {Promise<Object>} Raw ESPN summary (header, boxscore, seasonseries, injuries, ...)
    */
   async getGameSummary(gameId) {
     const cacheKey = `summary_${gameId}`;

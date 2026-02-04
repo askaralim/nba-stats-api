@@ -370,7 +370,7 @@ class GameTransformer {
     }
 
     const competition = event.competitions[0];
-    const status = event.status || {};
+    const status = competition.status || {};
     const statusType = status.type || {};
     
     const homeCompetitor = competition.competitors?.find(c => c.homeAway === 'home');
@@ -570,11 +570,17 @@ class GameTransformer {
     const overallRecord = competitor.records?.find(r => r.type === 'total') || {};
     const { wins, losses } = this.parseRecord(overallRecord.summary);
 
-    const periods = (competitor.linescores || []).map(ls => ({
-      period: ls.period,
-      score: ls.value,
-      periodType: ls.period <= 4 ? 'REGULAR' : 'OVERTIME'
-    }));
+    // linescores may be [{ displayValue: "33" }, ...] (period/score derived from index) or legacy { period, value }
+    const periods = (competitor.linescores || []).map((ls, index) => {
+      const period = ls.period !== undefined && ls.period !== null ? ls.period : index + 1;
+      const score = ls.value !== undefined && ls.value !== null
+        ? (typeof ls.value === 'number' ? ls.value : parseInt(ls.value, 10))
+        : (ls.displayValue !== undefined && ls.displayValue !== null
+          ? (typeof ls.displayValue === 'number' ? ls.displayValue : parseInt(String(ls.displayValue), 10))
+          : null);
+      const periodType = period <= 4 ? 'REGULAR' : 'OVERTIME';
+      return { period, score: isNaN(score) ? null : score, periodType };
+    });
 
     return this.createStandardTeam(competitor, {
       wins,
@@ -1759,6 +1765,7 @@ class GameTransformer {
         // Extract player info
         const playerId = athlete.id;
         const playerName = athlete.displayName || athlete.fullName || athlete.shortName;
+        const headshot = athlete.headshot?.href || null;
         
         if (!playerId || !playerName) return;
 
@@ -1791,13 +1798,15 @@ class GameTransformer {
         const injuryData = {
           playerId: playerId,
           name: playerName,
+          headshot: headshot,
           position: athlete.position?.abbreviation || athlete.position?.name || '',
           status: status,
           statusText: statusText || injury.status || '',
           date: injury.date || null,
           teamId: teamId,
           teamAbbreviation: team.abbreviation || '',
-          teamName: team.displayName || ''
+          teamName: team.displayName || '',
+          teamNameZhCN: getTeamNameZhCn(team.name)
         };
 
         if (isAwayTeam) {

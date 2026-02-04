@@ -117,11 +117,11 @@ router.get('/nba/games/:gameId',
       return sendSuccess(res, cachedResponse, null, 200, { version: 'v1' });
     }
     
-    const [gameData, summaryData] = await Promise.all([
-      nbaService.getGameDetails(gameId),
-      nbaService.getGameSummary(gameId).catch(() => null)
-    ]);
-    const transformed = gameTransformer.transformGame(gameData);
+    const { event, summaryData } = await nbaService.getGameDetails(gameId);
+    const transformed = gameTransformer.transformGame(event);
+    if (!transformed) {
+      throw new NotFoundError('Game');
+    }
     
     if (summaryData?.boxscore) {
       transformed.boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
@@ -147,101 +147,99 @@ router.get('/nba/games/:gameId',
   })
 );
 
+// --- Game summary (AI) helpers ---
+const GAME_SUMMARY_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Load and validate finished game + boxscore, then return or generate AI summary.
+ * @param {string} gameId
+ * @returns {Promise<{ summary: string, source: string, generatedAt: string }>}
+ * @throws {NotFoundError|ValidationError|ExternalAPIError}
+ */
+async function getGameSummaryPayload(gameId) {
+  const { event, summaryData } = await nbaService.getGameDetails(gameId);
+  const transformed = gameTransformer.transformGame(event);
+  if (!transformed) throw new NotFoundError('Game');
+  if (transformed.gameStatus !== 3) {
+    throw new ValidationError('AI summary is only available for finished games');
+  }
+
+  if (!summaryData?.boxscore) throw new NotFoundError('Game boxscore');
+
+  const boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
+  if (!boxscore) throw new NotFoundError('Game boxscore');
+
+  let teamStatistics = boxscore.teamStatistics;
+  if (!teamStatistics && boxscore.teams && boxscore.teams.length >= 2) {
+    teamStatistics = gameTransformer.extractTeamStatistics(summaryData.boxscore, boxscore.teams);
+    if (teamStatistics) boxscore.teamStatistics = teamStatistics;
+  }
+  if (!teamStatistics) throw new NotFoundError('Team statistics');
+
+  const gameSummaryCache = require('../services/gameSummaryCache');
+  const openaiService = require('../services/openaiService');
+  let aiSummary = gameSummaryCache.get(gameId);
+
+  if (aiSummary) return aiSummary;
+
+  const gameFacts = gameTransformer.computeGameFacts(
+    transformed,
+    summaryData.boxscore,
+    teamStatistics
+  );
+
+  if (gameFacts) {
+    try {
+      const summaryText = await openaiService.generateGameSummary(gameFacts);
+      gameSummaryCache.set(gameId, summaryText, 'ai');
+      return {
+        summary: summaryText,
+        source: 'ai',
+        generatedAt: new Date().toISOString()
+      };
+    } catch (aiError) {
+      console.error('AI summary generation failed:', aiError.message);
+      if (boxscore.gameStory) {
+        const fallbackSummary = boxscore.gameStory.summary;
+        gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
+        return {
+          summary: fallbackSummary,
+          source: 'fallback',
+          generatedAt: new Date().toISOString()
+        };
+      }
+      throw new ExternalAPIError('AI summary generation failed and no fallback available');
+    }
+  }
+
+  if (boxscore.gameStory) {
+    const fallbackSummary = boxscore.gameStory.summary;
+    gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
+    return {
+      summary: fallbackSummary,
+      source: 'fallback',
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  throw new ExternalAPIError('Unable to compute game facts and no fallback available');
+}
+
 // Get AI game summary - Strict rate limit
 router.get('/nba/games/:gameId/summary',
   validateGameId,
   strictRateLimiter,
   asyncHandler(async (req, res) => {
     const { gameId } = req.params;
-    
-    // Check response cache first (5 minute TTL for finished games)
     const cacheKey = `game_summary_${gameId}`;
-    const cachedResponse = responseCache.get(cacheKey, 5 * 60 * 1000); // 5 minutes
-    
+
+    const cachedResponse = responseCache.get(cacheKey, GAME_SUMMARY_CACHE_TTL_MS);
     if (cachedResponse) {
       return sendSuccess(res, cachedResponse, null, 200, { version: 'v1' });
     }
-    
-    const gameData = await nbaService.getGameDetails(gameId);
-    const transformed = gameTransformer.transformGame(gameData);
-    
-    if (transformed.gameStatus !== 3) {
-      throw new ValidationError('AI summary is only available for finished games');
-    }
-    
-    const summaryData = await nbaService.getGameSummary(gameId).catch(() => null);
-    if (!summaryData?.boxscore) {
-      throw new NotFoundError('Game boxscore');
-    }
-    
-    const boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
-    if (!boxscore) {
-      throw new NotFoundError('Game boxscore');
-    }
-    
-    let teamStatistics = boxscore.teamStatistics;
-    if (!teamStatistics && boxscore.teams && boxscore.teams.length >= 2) {
-      teamStatistics = gameTransformer.extractTeamStatistics(summaryData.boxscore, boxscore.teams);
-      if (teamStatistics) {
-        boxscore.teamStatistics = teamStatistics;
-      }
-    }
-    
-    if (!teamStatistics) {
-      throw new NotFoundError('Team statistics');
-    }
-    
-    const gameSummaryCache = require('../services/gameSummaryCache');
-    const openaiService = require('../services/openaiService');
-    
-    let aiSummary = gameSummaryCache.get(gameId);
-    
-    if (!aiSummary) {
-      const gameFacts = gameTransformer.computeGameFacts(
-        transformed,
-        summaryData.boxscore,
-        teamStatistics
-      );
-      
-      if (gameFacts) {
-        try {
-          const summaryText = await openaiService.generateGameSummary(gameFacts);
-          gameSummaryCache.set(gameId, summaryText, 'ai');
-          aiSummary = {
-            summary: summaryText,
-            source: 'ai',
-            generatedAt: new Date().toISOString()
-          };
-        } catch (aiError) {
-          console.error('AI summary generation failed:', aiError.message);
-          if (boxscore.gameStory) {
-            const fallbackSummary = boxscore.gameStory.summary;
-            gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
-            aiSummary = {
-              summary: fallbackSummary,
-              source: 'fallback',
-              generatedAt: new Date().toISOString()
-            };
-          } else {
-            throw new ExternalAPIError('AI summary generation failed and no fallback available');
-          }
-        }
-      } else if (boxscore.gameStory) {
-        const fallbackSummary = boxscore.gameStory.summary;
-        gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
-        aiSummary = {
-          summary: fallbackSummary,
-          source: 'fallback',
-          generatedAt: new Date().toISOString()
-        };
-      } else {
-        throw new ExternalAPIError('Unable to compute game facts and no fallback available');
-      }
-    }
-    
-    // Cache the response for 5 minutes
-    responseCache.set(cacheKey, aiSummary, 5 * 60 * 1000);
-    
+
+    const aiSummary = await getGameSummaryPayload(gameId);
+    responseCache.set(cacheKey, aiSummary, GAME_SUMMARY_CACHE_TTL_MS);
     sendSuccess(res, aiSummary, null, 200, { version: 'v1' });
   })
 );
