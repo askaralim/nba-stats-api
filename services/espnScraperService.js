@@ -3,6 +3,8 @@
  * Fetches player stats from ESPN API
  */
 
+const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+
 class ESPNScraperService {
   constructor() {
     this.baseUrl = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete';
@@ -136,6 +138,8 @@ class ESPNScraperService {
       position: player.position,
       positionId: player.positionId,
       team: player.team,
+      teamNameZhCN: getTeamNameZhCn(player.team),
+      teamCityZhCN: getTeamCityZhCn(player.team),
       teamId: player.teamId,
       teamLogo: player.teamLogo,
       headshot: player.headshot,
@@ -197,6 +201,7 @@ class ESPNScraperService {
       name: player.name,
       headshot: player.headshot,
       team: player.team,
+      teamNameZhCN: player.teamNameZhCN,
       teamLogo: player.teamLogo,
       position: player.position,
       statRank: player.statRank,

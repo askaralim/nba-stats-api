@@ -567,7 +567,7 @@ class GameTransformer {
   transformTeam(competitor) {
     if (!competitor?.team) return null;
 
-    const overallRecord = competitor.records?.find(r => r.type === 'total') || {};
+    const overallRecord = competitor.record?.find(r => r.type === 'total') || competitor.records?.find(r => r.type === 'total') ||{};
     const { wins, losses } = this.parseRecord(overallRecord.summary);
 
     // linescores may be [{ displayValue: "33" }, ...] (period/score derived from index) or legacy { period, value }
