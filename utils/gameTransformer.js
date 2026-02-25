@@ -1440,14 +1440,10 @@ class GameTransformer {
         let winner = null;
         if (isCompleted && awayScore !== null && homeScore !== null) {
           // Check if the winner in the event matches current away or home team
-          const eventWinner = awayCompetitor.winner ? awayCompetitor : (homeCompetitor.winner ? homeCompetitor : null);
-          if (eventWinner) {
-            const winnerTeamId = String(eventWinner.team?.id);
-            if (winnerTeamId === awayTeamId) {
-              winner = 'away';
-            } else if (winnerTeamId === homeTeamId) {
-              winner = 'home';
-            }
+          if (awayCompetitor.winner) {
+            winner = 'away';
+          } else if (homeCompetitor.winner) {
+            winner = 'home';
           }
         }
 
