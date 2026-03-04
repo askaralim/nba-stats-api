@@ -6,6 +6,8 @@ const espnScraperService = require('./services/espnScraperService');
 const standingsService = require('./services/standingsService');
 const teamService = require('./services/teamService');
 const newsService = require('./services/newsService');
+const newsIngestionService = require('./services/newsIngestionService');
+const newsTranslationService = require('./services/newsTranslationService');
 const playerService = require('./services/playerService');
 const gameTransformer = require('./utils/gameTransformer');
 
@@ -102,10 +104,10 @@ class WebServer {
     });
 
     // 4. News - Expensive operation, frequently accessed
-    console.log('  → Pre-fetching news...');
-    newsService.getShamsTweets().catch(err => {
-      console.error('  ✗ Failed to fetch news on startup:', err);
-    });
+    // console.log('  → Pre-fetching news...');
+    // newsService.getShamsTweets().catch(err => {
+    //   console.error('  ✗ Failed to fetch news on startup:', err);
+    // });
     
 
     console.log('Startup pre-fetch initiated (non-blocking)');
@@ -114,14 +116,27 @@ class WebServer {
     // SCHEDULED CRON JOBS
     // ============================================
     
-    // News: Every 5 minutes (expensive Puppeteer operation)
+    // News v2 Ingestion: Every 5 minutes (fetch, dedupe, insert into DB)
     cron.schedule('*/5 * * * *', async () => {
-      console.log('[Cron] Fetching news (scheduled every 5 minutes)...');
+      console.log('[Cron] News ingestion (scheduled every 5 minutes)...');
       try {
-        await newsService.getShamsTweets(true); // Force refresh
-        console.log('[Cron] ✓ News fetch completed successfully');
+        const result = await newsIngestionService.runIngestion();
+        console.log(`[Cron] ✓ News ingestion: ${result.inserted} inserted, ${result.skipped} skipped`);
       } catch (error) {
-        console.error('[Cron] ✗ Failed to fetch news:', error);
+        console.error('[Cron] ✗ News ingestion failed:', error);
+      }
+    });
+
+    // News v2 Translation: Every 3 minutes (translate pending articles)
+    cron.schedule('*/3 * * * *', async () => {
+      console.log('[Cron] News translation (scheduled every 3 minutes)...');
+      try {
+        const result = await newsTranslationService.runTranslation();
+        if (result.processed > 0) {
+          console.log(`[Cron] ✓ News translation: ${result.succeeded} succeeded, ${result.failed} failed`);
+        }
+      } catch (error) {
+        console.error('[Cron] ✗ News translation failed:', error);
       }
     });
 
@@ -160,16 +175,23 @@ class WebServer {
     });
 
     console.log('Cron jobs initialized:');
-    console.log('  - News: every 5 minutes');
+    console.log('  - News ingestion: every 5 minutes');
+    console.log('  - News translation: every 3 minutes');
     console.log('  - Today\'s Games: every 2 minutes');
     console.log('  - Standings: every 30 minutes');
     console.log('  - Team Info: every 30 minutes');
   }
 
   setupRoutes() {
-    // Health check endpoint
-    this.app.get('/health', (req, res) => {
-      sendSuccess(res, { status: 'ok', message: 'Server is running' });
+    // Health check endpoint (includes DB when DATABASE_URL is set)
+    this.app.get('/health', async (req, res) => {
+      const db = require('./config/db');
+      const payload = { status: 'ok', message: 'Server is running' };
+      if (db.isConfigured) {
+        const dbHealth = await db.healthCheck();
+        payload.database = dbHealth.ok ? 'connected' : { status: 'error', message: dbHealth.error };
+      }
+      sendSuccess(res, payload);
     });
 
     // Root endpoint
@@ -181,7 +203,11 @@ class WebServer {
     const v1Routes = require('./routes/v1');
     this.app.use('/api/v1', v1Routes);
 
-    // Legacy routes removed - all clients should use /api/v1/nba/*
+    // Mount v2 API routes (News System v2)
+    const v2Routes = require('./routes/v2');
+    this.app.use('/api/v2', v2Routes);
+
+    // Legacy routes removed - all clients should use /api/v1/nba/* or /api/v2/nba/*
     
     // Ignore favicon requests (browsers auto-request this)
     this.app.get('/favicon.ico', (req, res) => {

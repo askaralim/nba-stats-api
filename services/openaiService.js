@@ -311,6 +311,67 @@ ${overtimeSection}
   `;}
 
   /**
+   * Translate NBA news article to Simplified Chinese
+   * @param {Object} params - { title, content }
+   * @returns {Promise<{ translated_title: string, translated_content: string }>}
+   */
+  async translateNewsArticle({ title = '', content }) {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+    if (!content || typeof content !== 'string') {
+      throw new Error('Content is required for translation');
+    }
+
+    const userPrompt = title
+      ? `Translate the following NBA news to Simplified Chinese. Keep it professional, accurate, and fluent.\n\nTitle: ${title}\n\nContent:\n${content}\n\nRespond with JSON only: { "translated_title": "...", "translated_content": "..." }`
+      : `Translate the following NBA news to Simplified Chinese. Keep it professional, accurate, and fluent.\n\nContent:\n${content}\n\nRespond with JSON only: { "translated_title": "...", "translated_content": "..." }. Use the first sentence or a short summary as translated_title if no title is given.`;
+
+    try {
+      const response = await axios.post(
+        `${this.baseURL}/chat/completions`,
+        {
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content: '你是一个专业的体育新闻翻译。将英文NBA新闻翻译成简体中文，保持专业、准确、流畅。只输出JSON，不要其他文字。'
+            },
+            {
+              role: 'user',
+              content: userPrompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 2000,
+          response_format: { type: 'json_object' }
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 60000
+        }
+      );
+
+      const contentStr = response.data?.choices?.[0]?.message?.content?.trim();
+      if (!contentStr) {
+        throw new Error('Empty response from OpenAI');
+      }
+
+      const result = JSON.parse(contentStr);
+      return {
+        translated_title: result.translated_title || result.translatedTitle || '',
+        translated_content: result.translated_content || result.translatedContent || content
+      };
+    } catch (error) {
+      console.error('OpenAI translation error:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Build Step 2 prompt: Generate summary from analysis
    * @param {Object} analysis - Analysis JSON from step 1
    * @returns {string} Formatted prompt

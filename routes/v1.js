@@ -557,23 +557,24 @@ router.get('/nba/seasonLeaders',
   })
 );
 
-// Get NBA news - WITH PAGINATION
+// Get NBA news - WITH PAGINATION (DEPRECATED: use /api/v2/nba/translated-news)
 router.get('/nba/news',
   validatePagination,
   asyncHandler(async (req, res) => {
-    const forceRefresh = req.query.refresh === 'true';
+    res.setHeader('X-Deprecated', 'true');
+    res.setHeader('X-Deprecation-Info', 'Use /api/v2/nba/translated-news for translated news');
+
     const pagination = req.pagination;
-    
-    const tweets = await newsService.getShamsTweets(forceRefresh);
-    console.log('tweets', tweets);
+
+    const tweets = await newsService.getShamsTweets();
     // Paginate tweets
     const paginated = paginateArray(tweets, pagination);
-    
+
     sendSuccess(res, {
       tweets: paginated.data,
       source: 'Twitter/X',
       authors: ['Shams Charania', 'ESPN NBA', 'Marc Stein', 'Chris Haynes'],
-      cached: !forceRefresh
+      cached: false
     }, null, 200, {
       version: 'v1',
       pagination: paginated.meta.pagination

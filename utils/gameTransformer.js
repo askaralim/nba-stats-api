@@ -111,18 +111,15 @@ class GameTransformer {
     if (!awayAbbr || !homeAbbr) return false;
     
     // Any game involving GSW is a marquee matchup
-    if (awayAbbr === 'GS' || homeAbbr === 'GS' || awayAbbr === 'LAL' || homeAbbr === 'LAL' || awayAbbr === 'HOU' || homeAbbr === 'HOU') {
+    if (awayAbbr === 'GS' || homeAbbr === 'GS' || awayAbbr === 'LAL' || homeAbbr === 'LAL') {
       return true;
     }
     
     // Additional manually configured marquee matchups
     const marqueeMatchups = [
-      ['BOS', 'LAL'], ['LAL', 'BOS'],
-      ['MIA', 'LAL'], ['LAL', 'MIA'],
-      ['BOS', 'MIA'], ['MIA', 'BOS'],
-      ['PHX', 'LAL'], ['LAL', 'PHX'],
-      ['MIL', 'BOS'], ['BOS', 'MIL'],
-      ['DEN', 'LAL'], ['LAL', 'DEN']
+      ['OKC', 'DEN'], ['DEN', 'OKC'],
+      ['OKC', 'SA'], ['SA', 'OKC'],
+      ['DEN', 'SA'], ['SA', 'DEN'],
     ];
     
     const matchup = [awayAbbr, homeAbbr];

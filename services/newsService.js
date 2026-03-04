@@ -11,8 +11,6 @@ const dateFormatter = require('../utils/dateFormatter');
 
 class NewsService {
   constructor() {
-    this.cache = new Map();
-    this.cacheTimeout = 300000; // 5 minutes cache
     this.browser = null;
     this.fetchingPromise = null; // Lock to prevent concurrent requests
     
@@ -243,61 +241,20 @@ class NewsService {
   }
 
   /**
-   * Get tweets from Shams Charania's Twitter/X account using Nitter
-   * @param {boolean} forceRefresh - If true, bypass cache and fetch fresh data
+   * Get tweets from NBA news Twitter accounts using Nitter
+   * @param {boolean} [_forceRefresh] - Ignored (kept for API compatibility)
    * @returns {Promise<Array>} Array of tweet objects
    */
-  async getShamsTweets(forceRefresh = false) {
-    const cacheKey = 'shams_tweets';
-    const cached = this.cache.get(cacheKey);
-    
-    // Return cached data if available and not forcing refresh
-    if (!forceRefresh && cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      console.log('Returning cached tweets');
-      return cached.data;
-    }
-
-    // If cache expired but we have data, return stale data while fetching in background
-    if (!forceRefresh && cached) {
-      console.log('Cache expired, returning stale data while fetching fresh data in background');
-      // Trigger background refresh without blocking
-      this.refreshTweetsInBackground();
-      return cached.data;
-    }
-
+  async getShamsTweets(_forceRefresh = false) {
     // Prevent concurrent requests - if one is already in progress, wait for it
     if (this.fetchingPromise) {
       console.log('Another request is already in progress, waiting for it...');
       return this.fetchingPromise;
     }
 
-    // Create the fetching promise and store it
     this.fetchingPromise = this._fetchAllAccountsTweets();
-    
     try {
-      const result = await this.fetchingPromise;
-      return result;
-    } finally {
-      // Clear the promise when done
-      this.fetchingPromise = null;
-    }
-  }
-
-  /**
-   * Refresh tweets in background without blocking
-   * @private
-   */
-  async refreshTweetsInBackground() {
-    // Only refresh if not already fetching
-    if (this.fetchingPromise) {
-      return;
-    }
-
-    try {
-      this.fetchingPromise = this._fetchAllAccountsTweets();
-      await this.fetchingPromise;
-    } catch (error) {
-      console.error('Background tweet refresh failed:', error);
+      return await this.fetchingPromise;
     } finally {
       this.fetchingPromise = null;
     }
@@ -501,7 +458,6 @@ class NewsService {
    * @returns {Promise<Array>} Combined array of tweet objects from all accounts
    */
   async _fetchAllAccountsTweets() {
-    const cacheKey = 'nba_news_tweets';
     const allTweets = [];
     
     console.log(`Fetching tweets from ${this.nbaNewsAccounts.length} NBA news accounts...`);
@@ -550,16 +506,10 @@ class NewsService {
     });
     
     // Limit to latest 30 tweets total
-    const limitedTweets = allTweets.slice(0, 30);
-    
-    // Cache the response
-    this.cache.set(cacheKey, {
-      data: limitedTweets,
-      timestamp: Date.now()
-    });
-    
-    console.log(`Successfully fetched ${limitedTweets.length} tweets from ${this.nbaNewsAccounts.length} accounts`);
-    return limitedTweets;
+    // const limitedTweets = allTweets.slice(0, 30);
+
+    // console.log(`Successfully fetched ${limitedTweets.length} tweets from ${this.nbaNewsAccounts.length} accounts`);
+    return allTweets;
   }
 
   /**
