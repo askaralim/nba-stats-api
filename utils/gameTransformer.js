@@ -1114,17 +1114,60 @@ class GameTransformer {
    * @param {Object} player - Player object with stats
    * @returns {number} Game Impact Score
    */
-  calculateGIS(player) {
-    if (!player?.stats) return 0;
+  // calculateGIS(player) {
+  //   if (!player?.stats) return 0;
     
+  //   const pts = parseInt(player.stats.points) || 0;
+  //   const reb = parseInt(player.stats.rebounds) || 0;
+  //   const ast = parseInt(player.stats.assists) || 0;
+  //   const stl = parseInt(player.stats.steals) || 0;
+  //   const blk = parseInt(player.stats.blocks) || 0;
+  //   const tov = parseInt(player.stats.turnovers) || 0;
+    
+  //   return pts + (1.2 * reb) + (1.5 * ast) + (3 * stl) + (3 * blk) - (1 * tov);
+  // }
+
+  /**
+   * Calculate Game Impact Score (GIS) v2
+   * Inspired by Hollinger Game Score but simplified for box score data
+   */
+  calculateGIS(player, teamWon = false) {
+    if (!player?.stats) return 0;
+
     const pts = parseInt(player.stats.points) || 0;
     const reb = parseInt(player.stats.rebounds) || 0;
     const ast = parseInt(player.stats.assists) || 0;
     const stl = parseInt(player.stats.steals) || 0;
     const blk = parseInt(player.stats.blocks) || 0;
     const tov = parseInt(player.stats.turnovers) || 0;
-    
-    return pts + (1.2 * reb) + (1.5 * ast) + (3 * stl) + (3 * blk) - (1 * tov);
+
+    const fga = parseInt(player.stats.fieldGoals ? player.stats.fieldGoals.split('-')[1] : 0) || 0;
+    const fgm = parseInt(player.stats.fieldGoals ? player.stats.fieldGoals.split('-')[0] : 0) || 0;
+
+    const fta = parseInt(player.stats.freeThrows ? player.stats.freeThrows.split('-')[1] : 0) || 0;
+    const ftm = parseInt(player.stats.freeThrows ? player.stats.freeThrows.split('-')[0] : 0) || 0;
+
+    const orb = parseInt(player.stats.offensiveRebounds) || 0;
+
+    const threePM = parseInt(player.stats.threePointers ? player.stats.threePointers.split('-')[0] : 0) || 0;
+
+    let score =
+      pts +
+      (0.7 * reb) +
+      (0.7 * ast) +
+      (1.7 * stl) +
+      (1.2 * blk) +
+      (0.5 * threePM) -
+      (0.7 * (fga - fgm)) -
+      (0.4 * (fta - ftm)) -
+      tov +
+      (0.3 * orb);
+
+    if (teamWon) {
+      score += 2;
+    }
+
+    return Number(score.toFixed(1));
   }
 
   /**
@@ -1164,7 +1207,7 @@ class GameTransformer {
       // Skip players who didn't play
       if (player.didNotPlay) return;
       
-      const gis = this.calculateGIS(player);
+      const gis = this.calculateGIS(player, winningTeamId === player.teamId);
       
       if (gis > highestGIS) {
         highestGIS = gis;
