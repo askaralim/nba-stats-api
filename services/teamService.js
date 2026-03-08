@@ -21,6 +21,110 @@ class TeamService {
   }
 
   /**
+   * Fetch all NBA teams (basic info)
+   * Uses ESPN API: /apis/site/v2/sports/basketball/nba/teams
+   * @returns {Promise<Array>} Array of team objects with id, abbreviation, name, displayName, logo, etc.
+   */
+  async getAllTeams() {
+    const cacheKey = 'all_teams_list';
+    const cached = this.cache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
+    }
+
+    try {
+      const url = `${this.baseUrl}?region=us&lang=en`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const teams = data.sports?.[0]?.leagues?.[0]?.teams ?? [];
+      const result = teams
+        .map((item) => {
+          const t = item.team || item;
+          const displayName = t.displayName || `${t.location || ''} ${t.name || ''}`.trim();
+          const parts = displayName.split(' ');
+          const city = parts.slice(0, -1).join(' ') || t.location || '';
+          const name = parts[parts.length - 1] || displayName;
+          return {
+            id: t.id,
+            abbreviation: t.abbreviation || t.slug?.split('-').pop()?.toUpperCase(),
+            slug: t.slug,
+            name,
+            displayName,
+            city,
+            nameZhCN: getTeamNameZhCn(name),
+            cityZhCN: getTeamCityZhCn(city),
+            logo: t.logos?.[0]?.href || null
+          };
+        })
+        .filter((t) => t.id && t.abbreviation);
+
+      this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
+      return result;
+    } catch (error) {
+      console.error('Error fetching all teams:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch team roster (basic player info)
+   * Uses ESPN API: /apis/site/v2/sports/basketball/nba/teams/{team}/roster
+   * @param {string} teamAbbreviation - Team abbreviation/slug (e.g., 'gs', 'lal')
+   * @returns {Promise<Object>} { team, roster: [{ id, name, position, jersey, headshot }] }
+   */
+  async getTeamRoster(teamAbbreviation) {
+    const cacheKey = `team_roster_${teamAbbreviation}`;
+    const cached = this.cache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
+    }
+
+    try {
+      const slug = teamAbbreviation.toLowerCase();
+      const url = `${this.baseUrl}/${slug}/roster?region=us&lang=en`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const athletes = data.athletes || [];
+      const teamInfo = data.team || {};
+
+      const roster = athletes.map((a) => ({
+        id: a.id,
+        name: a.fullName || a.displayName || a.shortName || 'Unknown',
+        position: a.position?.abbreviation || a.position?.name || null,
+        jersey: a.jersey ? String(a.jersey) : null,
+        headshot: a.headshot?.href || null
+      }));
+
+      const result = {
+        team: {
+          id: teamInfo.id,
+          abbreviation: teamInfo.abbreviation,
+          displayName: teamInfo.displayName || null
+        },
+        roster
+      };
+
+      this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
+      return result;
+    } catch (error) {
+      console.error(`Error fetching roster for ${teamAbbreviation}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch team information
    * @param {string} teamAbbreviation - Team abbreviation (e.g., 'bos', 'lal')
    * @returns {Promise<Object>} Team information

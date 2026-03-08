@@ -395,6 +395,8 @@ class PlayerService {
 
       const details = {
         id: athlete.id,
+        firstName: athlete.firstName || null,
+        lastName: athlete.lastName || null,
         name: athlete.displayName || athlete.fullName || athlete.shortName || 'Unknown',
         photo: athlete.headshot?.href || null,
         team: athlete.team ? {

@@ -5,6 +5,7 @@
 
 const gameTransformer = require('../utils/gameTransformer');
 const { fetchWithRetry } = require('../utils/retry');
+const { getTeamNameZhCn } = require('../utils/teamTranslations');
 
 class NBAService {
   constructor() {
@@ -264,6 +265,7 @@ class NBAService {
       const allPlayers = new Map(); // Use Map to deduplicate by player ID
       
       events.forEach(event => {
+        const competitionId = event.id;
         const competition = event.competitions?.[0];
         if (!competition?.competitors) return;
         
@@ -305,7 +307,9 @@ class NBAService {
                   id: playerId,
                   name: athlete.fullName || athlete.displayName || athlete.shortName || '',
                   team: teamName,
+                  teamNameZhCN: getTeamNameZhCn(competitor.team.name),
                   teamAbbreviation: teamAbbreviation,
+                  competitionId: competitionId,
                   headshot: athlete.headshot?.href || athlete.headshot || null,
                   points: 0,
                   rebounds: 0,
@@ -346,10 +350,21 @@ class NBAService {
         .sort((a, b) => b.assists - a.assists)
         .slice(0, 3);
 
+      const toPlayerShape = (p, valueKey) => ({
+        id: p.id,
+        name: p.name,
+        team: p.team,
+        teamNameZhCN: p.teamNameZhCN,
+        teamAbbreviation: p.teamAbbreviation,
+        competitionId: p.competitionId,
+        headshot: p.headshot,
+        value: p[valueKey]
+      });
+
       const result = {
-        points: topPoints,
-        rebounds: topRebounds,
-        assists: topAssists
+        points: topPoints.map(p => toPlayerShape(p, 'points')),
+        rebounds: topRebounds.map(p => toPlayerShape(p, 'rebounds')),
+        assists: topAssists.map(p => toPlayerShape(p, 'assists'))
       };
 
       // Cache the result

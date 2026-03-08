@@ -67,9 +67,9 @@ const validateTeamAbbreviation = (req, res, next) => {
     return next(new ValidationError('teamAbbreviation parameter is required'));
   }
   
-  // Team abbreviations are 2-3 uppercase letters
-  if (!/^[A-Z]{2,3}$/i.test(teamAbbreviation)) {
-    return next(new ValidationError('teamAbbreviation must be 2-3 letters'));
+  // Team slugs: 2-4 letters (e.g. gs, lal, utah)
+  if (!/^[a-z]{2,4}$/i.test(teamAbbreviation)) {
+    return next(new ValidationError('teamAbbreviation must be 2-4 letters'));
   }
   
   next();

@@ -283,8 +283,17 @@ router.get('/nba/stats/players',
   })
 );
 
+// Get all NBA teams (list) - MUST be before /nba/teams/:teamAbbreviation
+router.get('/nba/teams',
+  asyncHandler(async (req, res) => {
+    const teams = await teamService.getAllTeams();
+    sendSuccess(res, { teams }, null, 200, { version: 'v1' });
+  })
+);
+
 // Get NBA standings
 router.get('/nba/standings',
+// Get NBA standings
   asyncHandler(async (req, res) => {
     const {
       season = '2026',
@@ -298,6 +307,16 @@ router.get('/nba/standings',
     
     const standingsData = await standingsService.getStandings(options);
     sendSuccess(res, standingsData, null, 200, { version: 'v1' });
+  })
+);
+
+// Get team roster (basic player info) - MUST be before /nba/teams/:teamAbbreviation
+router.get('/nba/teams/:teamAbbreviation/roster',
+  validateTeamAbbreviation,
+  asyncHandler(async (req, res) => {
+    const { teamAbbreviation } = req.params;
+    const rosterData = await teamService.getTeamRoster(teamAbbreviation);
+    sendSuccess(res, rosterData, null, 200, { version: 'v1' });
   })
 );
 
@@ -528,6 +547,7 @@ router.get('/nba/seasonLeaders',
         id: player.id,
         name: player.name,
         team: player.team,
+        teamNameZhCN: player.teamNameZhCN,
         teamAbbreviation: player.teamLogo ? player.teamLogo.split('/').pop().split('.')[0].toUpperCase() : null,
         headshot: player.headshot,
         value: player.stats?.avgPoints?.displayValue || player.stats?.avgPoints?.value || '-',
@@ -537,6 +557,7 @@ router.get('/nba/seasonLeaders',
         id: player.id,
         name: player.name,
         team: player.team,
+        teamNameZhCN: player.teamNameZhCN,
         teamAbbreviation: player.teamLogo ? player.teamLogo.split('/').pop().split('.')[0].toUpperCase() : null,
         headshot: player.headshot,
         value: player.stats?.avgRebounds?.displayValue || player.stats?.avgRebounds?.value || '-',
@@ -546,6 +567,7 @@ router.get('/nba/seasonLeaders',
         id: player.id,
         name: player.name,
         team: player.team,
+        teamNameZhCN: player.teamNameZhCN,
         teamAbbreviation: player.teamLogo ? player.teamLogo.split('/').pop().split('.')[0].toUpperCase() : null,
         headshot: player.headshot,
         value: player.stats?.avgAssists?.displayValue || player.stats?.avgAssists?.value || '-',

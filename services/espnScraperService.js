@@ -113,6 +113,7 @@ class ESPNScraperService {
       position: athlete.position?.abbreviation || athlete.position?.name || '',
       positionId: athlete.position?.id || null,
       team: athlete.teamName || athlete.teamShortName || '',
+      teamNameZhCN: getTeamNameZhCn(athlete.teamName || athlete.teamShortName || ''),
       teamId: athlete.teamId || null,
       teamLogo: athlete.teamLogos?.[0]?.href || null,
       headshot: athlete.headshot?.href || null,
