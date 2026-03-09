@@ -1025,6 +1025,38 @@ class GameTransformer {
       });
     });
 
+    // Calculate Game MVP (Who carried?) - compute winning team first for GIS
+    const teamScores = {};
+    teams.forEach(team => {
+      const boxscoreTeam = boxscoreData.teams?.find(t => String(t.team?.id) === String(team.teamId));
+      let teamScore = null;
+      if (boxscoreTeam?.score !== undefined && boxscoreTeam?.score !== null) {
+        teamScore = parseInt(boxscoreTeam.score, 10);
+      } else {
+        const teamPlayers = allPlayers.filter(p => String(p.teamId) === String(team.id));
+        teamScore = teamPlayers.reduce((sum, player) => {
+          return sum + (parseInt(player.stats.points) || 0);
+        }, 0);
+      }
+      teamScores[team.id] = teamScore;
+    });
+
+    let winningTeamId = null;
+    const teamIds = Object.keys(teamScores);
+    if (teamIds.length === 2) {
+      const score1 = teamScores[teamIds[0]];
+      const score2 = teamScores[teamIds[1]];
+      if (score1 > score2) winningTeamId = teamIds[0];
+      else if (score2 > score1) winningTeamId = teamIds[1];
+    }
+
+    // Add GIS to all players who played (for ranking, etc.)
+    allPlayers.forEach(player => {
+      if (!player.didNotPlay) {
+        player.gis = this.calculateGIS(player, String(winningTeamId) === String(player.teamId));
+      }
+    });
+
     // Separate players by team and by starter/bench
     const transformedTeams = teams.map(team => {
       // Match players to team using teamId (from player) vs id (from transformed team)
@@ -1056,42 +1088,6 @@ class GameTransformer {
       };
     });
 
-    // Calculate Game MVP (Who carried?) - only from winning team
-    // Get team scores from boxscore data
-    const teamScores = {};
-    teams.forEach(team => {
-      // Try to get score from boxscore team data first
-      const boxscoreTeam = boxscoreData.teams?.find(t => String(t.team?.id) === String(team.teamId));
-      let teamScore = null;
-      
-      if (boxscoreTeam?.score !== undefined && boxscoreTeam?.score !== null) {
-        // Score is directly available
-        teamScore = parseInt(boxscoreTeam.score, 10);
-      } else {
-        // Calculate total team score from player points
-        const teamPlayers = allPlayers.filter(p => String(p.teamId) === String(team.id));
-        teamScore = teamPlayers.reduce((sum, player) => {
-          return sum + (parseInt(player.stats.points) || 0);
-        }, 0);
-      }
-      
-      teamScores[team.teamId] = teamScore;
-    });
-    
-    // Determine winning team (team with higher score)
-    const teamIds = Object.keys(teamScores);
-    let winningTeamId = null;
-    if (teamIds.length === 2) {
-      const score1 = teamScores[teamIds[0]];
-      const score2 = teamScores[teamIds[1]];
-      if (score1 > score2) {
-        winningTeamId = teamIds[0];
-      } else if (score2 > score1) {
-        winningTeamId = teamIds[1];
-      }
-      // If scores are equal (tie), winningTeamId remains null - MVP from both teams
-    }
-    
     const gameMVP = this.calculateGameMVP(allPlayers, teams, winningTeamId);
 
     // Generate game story (only for completed games)
@@ -1131,7 +1127,7 @@ class GameTransformer {
    * Calculate Game Impact Score (GIS) v2
    * Inspired by Hollinger Game Score but simplified for box score data
    */
-  calculateGIS(player, teamWon = false) {
+  calculateGIS(player, teamWon) {
     if (!player?.stats) return 0;
 
     const pts = parseInt(player.stats.points) || 0;
@@ -1167,6 +1163,14 @@ class GameTransformer {
       score += 2;
     }
 
+    if (fgm > 5 && fgm / fga > 0.6) {
+      score += 2;
+    }
+
+    if (pts > 10 && reb > 10 && ast > 10) {
+      score += 5;
+    }
+
     return Number(score.toFixed(1));
   }
 
@@ -1183,7 +1187,7 @@ class GameTransformer {
    * @param {string|null} winningTeamId - ID of the winning team (null if tie or not determined)
    * @returns {Object|null} Game MVP player object
    */
-  calculateGameMVP(allPlayers, teams = [], winningTeamId = null) {
+  calculateGameMVP(allPlayers, teams = [], winningTeamId) {
     if (!allPlayers || allPlayers.length === 0) {
       return null;
     }
@@ -1206,14 +1210,13 @@ class GameTransformer {
     eligiblePlayers.forEach(player => {
       // Skip players who didn't play
       if (player.didNotPlay) return;
-      
       const gis = this.calculateGIS(player, winningTeamId === player.teamId);
       
       if (gis > highestGIS) {
         highestGIS = gis;
         
         // Find team info for this player
-        const playerTeam = teams.find(t => String(t.teamId) === String(player.teamId));
+        const playerTeam = teams.find(t => String(t.id) === String(player.teamId));
         
         gameMVP = {
           athleteId: player.athleteId,
