@@ -512,24 +512,59 @@ router.get('/nba/teams/:teamAbbreviation/recent-games',
   })
 );
 
-// Get today's top performers (from scoreboard leaders)
+// Get today's top performers (GIS-based, with optional Swish Insight for finished games)
+const SWISH_INSIGHT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const TODAY_TOP_CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
+
 router.get('/nba/todayTopPerformers',
   asyncHandler(async (req, res) => {
-    const { date } = req.query;
-    
-    let todayTopPerformers;
+    const { date, insight: insightParam } = req.query;
+    const skipInsight = insightParam === 'false' || insightParam === '0';
+
+    const cacheKey = `today_top_performers_${date || 'today'}`;
+    const cached = responseCache.get(cacheKey, TODAY_TOP_CACHE_TTL_MS);
+    if (cached) {
+      return sendSuccess(res, cached, null, 200, { version: 'v1' });
+    }
+
+    let result;
     try {
-      todayTopPerformers = await nbaService.getTodayTopPerformers(date);
+      result = await nbaService.getTodayTopPerformersByGIS(date);
     } catch (error) {
       console.error('Error fetching today top performers:', error.message);
-      todayTopPerformers = {
-        points: [],
-        rebounds: [],
-        assists: []
-      };
+      result = { mode: 'gis', performers: [], hasFinishedGames: false };
     }
-    
-    sendSuccess(res, todayTopPerformers, null, 200, { version: 'v1' });
+
+    if (result.performers?.length > 0 && result.hasFinishedGames && !skipInsight) {
+      const playerService = require('../services/playerService');
+      const openaiService = require('../services/openaiService');
+
+      for (const performer of result.performers) {
+        const insightCacheKey = `swish_insight_${performer.id}_${performer.competitionId}`;
+        let insight = responseCache.get(insightCacheKey, SWISH_INSIGHT_CACHE_TTL_MS);
+
+        if (!insight) {
+          try {
+            const seasonStats = await playerService.getPlayerCurrentSeasonStats(performer.id);
+            insight = await openaiService.generateSwishInsight({
+              playerName: performer.name,
+              gameStats: performer.stats || {},
+              seasonStats: seasonStats?.stats || seasonStats || {}
+            });
+            responseCache.set(insightCacheKey, insight, SWISH_INSIGHT_CACHE_TTL_MS);
+          } catch (aiErr) {
+            console.warn(`Swish Insight failed for ${performer.name}:`, aiErr.message);
+          }
+        }
+
+        if (insight) {
+          performer.insight = insight;
+        }
+      }
+    }
+
+    responseCache.set(cacheKey, result, TODAY_TOP_CACHE_TTL_MS);
+    sendSuccess(res, result, null, 200, { version: 'v1' });
   })
 );
 

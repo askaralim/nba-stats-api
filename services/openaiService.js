@@ -372,6 +372,104 @@ ${overtimeSection}
   }
 
   /**
+   * Generate Swish Insight for a top performer (Chinese, data-driven)
+   * @param {Object} payload - { playerName, gameStats, seasonStats }
+   * @returns {Promise<string>} 1-2 sentence insight in Chinese
+   */
+  async generateSwishInsight(payload) {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    const { playerName, gameStats = {}, seasonStats = {} } = payload;
+    const seasonData = seasonStats?.stats || seasonStats || {};
+    const gamePts = parseInt(gameStats.points) || 0;
+    const gameReb = parseInt(gameStats.rebounds) || 0;
+    const gameAst = parseInt(gameStats.assists) || 0;
+    const gameStl = parseInt(gameStats.steals) || 0;
+    const gameBlk = parseInt(gameStats.blocks) || 0;
+    const gameTov = parseInt(gameStats.turnovers) || 0;
+
+    const fg = (gameStats.fieldGoals || '0-0').split('-');
+    const three = (gameStats.threePointers || '0-0').split('-');
+    const ft = (gameStats.freeThrows || '0-0').split('-');
+    const fgm = parseInt(fg[0]) || 0;
+    const fga = parseInt(fg[1]) || 0;
+    const threePM = parseInt(three[0]) || 0;
+    const threePA = parseInt(three[1]) || 0;
+    const ftm = parseInt(ft[0]) || 0;
+    const fta = parseInt(ft[1]) || 0;
+
+    const fgPct = fga > 0 ? Math.round((fgm / fga) * 100) : 0;
+    const threePct = threePA > 0 ? Math.round((threePM / threePA) * 100) : 0;
+    const ftPct = fta > 0 ? Math.round((ftm / fta) * 100) : 0;
+
+    const seasonPts = parseFloat(seasonData.avgPoints || seasonData.points || 0) || 0;
+    const seasonFg = parseFloat(seasonData.fieldGoalPct || seasonData.fieldGoalPercentage || 0) || 0;
+    const seasonThree = parseFloat(seasonData.threePointFieldGoalPct || seasonData.threePointFieldGoalPercentage || 0) || 0;
+    const seasonFt = parseFloat(seasonData.freeThrowPct || seasonData.freeThrowPercentage || 0) || 0;
+    const seasonReb = parseFloat(seasonData.avgRebounds || seasonData.rebounds || 0) || 0;
+    const seasonAst = parseFloat(seasonData.avgAssists || seasonData.assists || 0) || 0;
+    const seasonStl = parseFloat(seasonData.avgSteals || seasonData.steals || 0) || 0;
+    const seasonBlk = parseFloat(seasonData.avgBlocks || seasonData.blocks || 0) || 0;
+    const seasonTov = parseFloat(seasonData.avgTurnovers || seasonData.turnovers || 0) || 0;
+
+    const userPrompt = `球员：${playerName}
+
+本场数据：${gamePts}分 ${gameReb}篮板 ${gameAst}助攻 ${gameStl}抢断 ${gameBlk}盖帽 ${gameTov}失误，投篮${fgm}/${fga}（${fgPct}%），三分${threePM}/${threePA}（${threePct}%），罚球${ftm}/${fta}（${ftPct}%）
+
+赛季场均：${seasonPts}分 ${seasonReb}篮板 ${seasonAst}助攻 ${seasonStl}抢断 ${seasonBlk}盖帽 ${seasonTov}失误，投篮${seasonFg}%，三分${seasonThree}%，罚球${seasonFt}%
+
+这是球员${playerName}的本场数据和赛季场均数据，请生成一句非常简短的数据洞察（最多20个汉字）。要求：
+- 突出球员对比赛的影响力
+- 球员对比赛的影响力包括进攻以及防守两个方面
+- 进攻球员需要在命中率以及得分上有显著的表现
+- 防守球员需要在抢断、篮板、盖帽以上有显著的表现
+- 如果球员有三双表现需要特别强调
+- 必须包含具体数字，不要解释背景
+- 按照你的理解，突出影响比赛的具体数据以及表现
+- 像体育解说的短评
+- 只输出一句话`;
+
+    try {
+      const response = await axios.post(
+        `${this.baseURL}/chat/completions`,
+        {
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content: '你是一个NBA数据分析师。根据本场数据和赛季场均数据，生成一句简短的数据洞察，用中文。不要空洞赞美，要有具体对比。只输出洞察文字，不要引号或前缀。'
+            },
+            {
+              role: 'user',
+              content: userPrompt
+            }
+          ],
+          temperature: 0.5,
+          max_tokens: 40
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        }
+      );
+
+      const insight = response.data?.choices?.[0]?.message?.content?.trim();
+      if (!insight) {
+        throw new Error('Empty response from OpenAI');
+      }
+      return insight;
+    } catch (error) {
+      console.error('OpenAI Swish Insight error:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Build Step 2 prompt: Generate summary from analysis
    * @param {Object} analysis - Analysis JSON from step 1
    * @returns {string} Formatted prompt

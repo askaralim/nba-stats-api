@@ -73,7 +73,8 @@ class NBAService {
     }
 
     try {
-      const url = `${this.baseUrl}/scoreboard?dates=${espnDate}`;
+      // const url = `${this.baseUrl}/scoreboard?dates=${espnDate}`;
+      const url = `${this.baseUrl}/scoreboard?dates=20260308`;
       
       // Use retry logic with exponential backoff for transient failures
       const response = await fetchWithRetry(url, {
@@ -131,9 +132,9 @@ class NBAService {
   async getGameDetails(gameId) {
     const cacheKey = `game_${gameId}`;
     const cached = this.cache.get(cacheKey);
-    
-    // Cache game details for 30 seconds
-    if (cached && Date.now() - cached.timestamp < 30000) {
+
+    // Cache: 2 min to reduce ESPN API load
+    if (cached && Date.now() - cached.timestamp < 2 * 60 * 1000) {
       return cached.data;
     }
 
@@ -181,9 +182,9 @@ class NBAService {
   async getGameSummary(gameId) {
     const cacheKey = `summary_${gameId}`;
     const cached = this.cache.get(cacheKey);
-    
-    // Cache summary for 30 seconds
-    if (cached && Date.now() - cached.timestamp < 30000) {
+
+    // Cache: 2 min to reduce ESPN API load
+    if (cached && Date.now() - cached.timestamp < 2 * 60 * 1000) {
       return cached.data;
     }
 
@@ -229,16 +230,50 @@ class NBAService {
   }
 
   /**
-   * Get today's top performers from completed games
-   * @param {string} date - Date in YYYYMMDD format
-   * @returns {Promise<Object>} Top performers for today (points, rebounds, assists)
+   * Check if an ESPN event has started (in progress or finished)
+   * @param {Object} event - Raw ESPN event
+   * @returns {number|null} gameStatus 2 or 3 if started, null if scheduled
    */
-  async getTodayTopPerformers(date = null) {
+  _getEventGameStatus(event) {
+    const competition = event?.competitions?.[0];
+    if (!competition) return null;
+    const status = competition.status || {};
+    const statusType = status.type || {};
+    const statusName = statusType.name || '';
+
+    const homeCompetitor = competition.competitors?.find(c => c.homeAway === 'home');
+    const awayCompetitor = competition.competitors?.find(c => c.homeAway === 'away');
+    const homeScore = homeCompetitor?.score !== undefined && homeCompetitor?.score !== null
+      ? parseInt(homeCompetitor.score, 10) : null;
+    const awayScore = awayCompetitor?.score !== undefined && awayCompetitor?.score !== null
+      ? parseInt(awayCompetitor.score, 10) : null;
+    const hasActualScores = homeScore !== null && awayScore !== null && (homeScore > 0 || awayScore > 0);
+    const isCompleted = statusType.completed === true || status.completed === true;
+
+    let gameStatus = this.mapStatus(statusName);
+    if (hasActualScores && gameStatus === 1) {
+      gameStatus = isCompleted ? 3 : 2;
+    }
+    if (hasActualScores && !isCompleted && gameStatus === 3) gameStatus = 2;
+    if (hasActualScores && isCompleted && gameStatus === 2) gameStatus = 3;
+    if (homeScore === 0 && awayScore === 0) {
+      gameStatus = this.mapStatus(statusName);
+    }
+
+    return (gameStatus === 2 || gameStatus === 3) ? gameStatus : null;
+  }
+
+  /**
+   * Get today's top performers by GIS (from game summary/boxscore)
+   * Fetches game details for each started game, computes GIS, returns top 3-5
+   * @param {string} date - Date in YYYYMMDD format
+   * @returns {Promise<Object>} { mode, performers, hasFinishedGames }
+   */
+  async getTodayTopPerformersByGIS(date = null) {
     const dateStr = date || this.formatDateForAPI(new Date());
-    const cacheKey = `today_top_${dateStr}`;
+    const cacheKey = `today_top_gis_${dateStr}`;
     const cached = this.cache.get(cacheKey);
-    
-    // Cache for 5 minutes
+
     if (cached && Date.now() - cached.timestamp < 300000) {
       return cached.data;
     }
@@ -246,63 +281,145 @@ class NBAService {
     try {
       const scoreboardData = await this.getScoreboard(dateStr);
       const events = scoreboardData.events || [];
-      
+
       if (events.length === 0) {
         const emptyResult = {
-          points: [],
-          rebounds: [],
-          assists: []
+          mode: 'gis',
+          performers: [],
+          hasFinishedGames: false
         };
-        this.cache.set(cacheKey, {
-          data: emptyResult,
-          timestamp: Date.now()
-        });
+        this.cache.set(cacheKey, { data: emptyResult, timestamp: Date.now() });
         return emptyResult;
       }
 
-      // Extract all players from leaders in scoreboard data
-      // Works for both completed AND in-progress games!
-      const allPlayers = new Map(); // Use Map to deduplicate by player ID
-      
+      const allPlayers = [];
+      let hasFinishedGames = false;
+
+      for (const event of events) {
+        const gameStatus = this._getEventGameStatus(event);
+        if (!gameStatus) continue;
+
+        if (gameStatus === 3) hasFinishedGames = true;
+
+        const gameId = event.id;
+        let boxscore;
+        try {
+          const { summaryData } = await this.getGameDetails(gameId);
+          if (!summaryData?.boxscore) continue;
+          boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
+        } catch (err) {
+          console.warn(`Failed to get game details for ${gameId}:`, err.message);
+          continue;
+        }
+
+        if (!boxscore?.teams) continue;
+
+        for (const team of boxscore.teams) {
+          const starters = team.starters || [];
+          const bench = team.bench || [];
+          const teamPlayers = [...starters, ...bench].filter(p => !p.didNotPlay);
+
+          for (const player of teamPlayers) {
+            if (player.gis == null) continue;
+            allPlayers.push({
+              id: player.athleteId,
+              name: player.name || player.shortName || '',
+              teamAbbreviation: team.abbreviation || '',
+              teamNameZhCN: getTeamNameZhCn(team.name),
+              competitionId: gameId,
+              headshot: player.headshot || null,
+              gis: player.gis,
+              stats: {
+                points: parseInt(player.stats?.points) || 0,
+                rebounds: parseInt(player.stats?.rebounds) || 0,
+                assists: parseInt(player.stats?.assists) || 0,
+                steals: parseInt(player.stats?.steals) || 0,
+                blocks: parseInt(player.stats?.blocks) || 0,
+                turnovers: parseInt(player.stats?.turnovers) || 0,
+                fieldGoals: player.stats?.fieldGoals || '0-0',
+                threePointers: player.stats?.threePointers || '0-0',
+                freeThrows: player.stats?.freeThrows || '0-0'
+              }
+            });
+          }
+        }
+      }
+
+      const topPerformers = allPlayers
+        .sort((a, b) => (b.gis || 0) - (a.gis || 0))
+        .slice(0, 3);
+
+      const result = {
+        mode: 'gis',
+        performers: topPerformers,
+        hasFinishedGames
+      };
+
+      this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
+      return result;
+    } catch (error) {
+      console.error('Error fetching today top performers by GIS:', error);
+      return {
+        mode: 'gis',
+        performers: [],
+        hasFinishedGames: false
+      };
+    }
+  }
+
+  /**
+   * Get today's top performers from completed games (legacy - scoreboard leaders)
+   * @param {string} date - Date in YYYYMMDD format
+   * @returns {Promise<Object>} Top performers for today (points, rebounds, assists)
+   */
+  async getTodayTopPerformers(date = null) {
+    const dateStr = date || this.formatDateForAPI(new Date());
+    const cacheKey = `today_top_${dateStr}`;
+    const cached = this.cache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < 300000) {
+      return cached.data;
+    }
+
+    try {
+      const scoreboardData = await this.getScoreboard(dateStr);
+      const events = scoreboardData.events || [];
+
+      if (events.length === 0) {
+        const emptyResult = { points: [], rebounds: [], assists: [] };
+        this.cache.set(cacheKey, { data: emptyResult, timestamp: Date.now() });
+        return emptyResult;
+      }
+
+      const allPlayers = new Map();
+
       events.forEach(event => {
         const competitionId = event.id;
         const competition = event.competitions?.[0];
         if (!competition?.competitors) return;
-        
+
         competition.competitors.forEach(competitor => {
           const teamName = competitor.team?.displayName || competitor.team?.name || '';
           const teamAbbreviation = competitor.team?.abbreviation || '';
-          
-          // Extract leaders (top performers) for this team
-          // Structure: leaders is an array of stat categories (points, rebounds, assists, etc.)
-          // Each category has a nested leaders array with athlete and value
+
           const statCategories = competitor.leaders || [];
-          
           statCategories.forEach(category => {
             const categoryName = category.name?.toLowerCase();
             if (!categoryName || !category.leaders || !Array.isArray(category.leaders)) return;
-            
-            // Process each leader in this category
+
             category.leaders.forEach(leader => {
               const athlete = leader.athlete;
               if (!athlete?.id) return;
-              
+
               const statValue = parseInt(leader.displayValue || leader.value || 0);
-              
-              // Update or create player entry
+
               const playerId = athlete.id;
               if (allPlayers.has(playerId)) {
                 const existing = allPlayers.get(playerId);
-                // Update the stat for this category
-                if (categoryName === 'points') {
-                  existing.points = Math.max(existing.points, statValue);
-                } else if (categoryName === 'rebounds') {
-                  existing.rebounds = Math.max(existing.rebounds, statValue);
-                } else if (categoryName === 'assists') {
-                  existing.assists = Math.max(existing.assists, statValue);
-                }
+                if (categoryName === 'points') existing.points = Math.max(existing.points, statValue);
+                else if (categoryName === 'rebounds') existing.rebounds = Math.max(existing.rebounds, statValue);
+                else if (categoryName === 'assists') existing.assists = Math.max(existing.assists, statValue);
               } else {
-                // Create new player entry
                 const player = {
                   id: playerId,
                   name: athlete.fullName || athlete.displayName || athlete.shortName || '',
@@ -315,16 +432,9 @@ class NBAService {
                   rebounds: 0,
                   assists: 0
                 };
-                
-                // Set the stat value for this category
-                if (categoryName === 'points') {
-                  player.points = statValue;
-                } else if (categoryName === 'rebounds') {
-                  player.rebounds = statValue;
-                } else if (categoryName === 'assists') {
-                  player.assists = statValue;
-                }
-                
+                if (categoryName === 'points') player.points = statValue;
+                else if (categoryName === 'rebounds') player.rebounds = statValue;
+                else if (categoryName === 'assists') player.assists = statValue;
                 allPlayers.set(playerId, player);
               }
             });
@@ -332,23 +442,10 @@ class NBAService {
         });
       });
 
-      // Convert Map to Array and get top 3 for each category
       const playersArray = Array.from(allPlayers.values());
-      
-      const topPoints = [...playersArray]
-        .filter(p => p.points > 0)
-        .sort((a, b) => b.points - a.points)
-        .slice(0, 3);
-      
-      const topRebounds = [...playersArray]
-        .filter(p => p.rebounds > 0)
-        .sort((a, b) => b.rebounds - a.rebounds)
-        .slice(0, 3);
-      
-      const topAssists = [...playersArray]
-        .filter(p => p.assists > 0)
-        .sort((a, b) => b.assists - a.assists)
-        .slice(0, 3);
+      const topPoints = [...playersArray].filter(p => p.points > 0).sort((a, b) => b.points - a.points).slice(0, 3);
+      const topRebounds = [...playersArray].filter(p => p.rebounds > 0).sort((a, b) => b.rebounds - a.rebounds).slice(0, 3);
+      const topAssists = [...playersArray].filter(p => p.assists > 0).sort((a, b) => b.assists - a.assists).slice(0, 3);
 
       const toPlayerShape = (p, valueKey) => ({
         id: p.id,
@@ -367,20 +464,11 @@ class NBAService {
         assists: topAssists.map(p => toPlayerShape(p, 'assists'))
       };
 
-      // Cache the result
-      this.cache.set(cacheKey, {
-        data: result,
-        timestamp: Date.now()
-      });
-
+      this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } catch (error) {
       console.error('Error fetching today top performers:', error);
-      return {
-        points: [],
-        rebounds: [],
-        assists: []
-      };
+      return { points: [], rebounds: [], assists: [] };
     }
   }
 }
