@@ -73,9 +73,8 @@ class NBAService {
     }
 
     try {
-      // const url = `${this.baseUrl}/scoreboard?dates=${espnDate}`;
-      const url = `${this.baseUrl}/scoreboard?dates=20260308`;
-      
+      const url = `${this.baseUrl}/scoreboard?dates=${espnDate}`;
+
       // Use retry logic with exponential backoff for transient failures
       const response = await fetchWithRetry(url, {
         headers: {
