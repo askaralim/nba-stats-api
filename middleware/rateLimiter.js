@@ -126,7 +126,7 @@ const createRateLimiter = (options = {}) => {
  * Standard rate limiter (100 requests per 15 minutes)
  */
 const standardRateLimiter = createRateLimiter({
-  maxRequests: 100,
+  maxRequests: 180,
   windowMs: 15 * 60 * 1000
 });
 
