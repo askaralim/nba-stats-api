@@ -346,7 +346,7 @@ class NBAService {
 
       const topPerformers = allPlayers
         .sort((a, b) => (b.gis || 0) - (a.gis || 0))
-        .slice(0, 3);
+        .slice(0, 5);
 
       const result = {
         mode: 'gis',
