@@ -4,6 +4,7 @@
  */
 
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+const { formatPlayerNameForDisplay } = require('../utils/playerName');
 
 class ESPNScraperService {
   constructor() {
@@ -106,7 +107,7 @@ class ESPNScraperService {
     return {
       id: athlete.id || athlete.uid || null,
       uid: athlete.uid || null,
-      name: athlete.displayName || `${athlete.firstName} ${athlete.lastName}` || '',
+      name: formatPlayerNameForDisplay(athlete.displayName || `${athlete.firstName} ${athlete.lastName}` || ''),
       shortName: athlete.shortName || '',
       firstName: athlete.firstName || '',
       lastName: athlete.lastName || '',

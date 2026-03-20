@@ -6,10 +6,11 @@
 const gameTransformer = require('../utils/gameTransformer');
 const { fetchWithRetry } = require('../utils/retry');
 const { getTeamNameZhCn } = require('../utils/teamTranslations');
+const { formatPlayerNameForDisplay } = require('../utils/playerName');
 
 class NBAService {
   constructor() {
-    this.baseUrl = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
+    this.baseUrl = 'https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba';
     this.cache = new Map();
     this.cacheTimeout = 5000; // 5 seconds cache for live games
   }
@@ -322,7 +323,7 @@ class NBAService {
             if (player.gis == null) continue;
             allPlayers.push({
               id: player.athleteId,
-              name: player.name || player.shortName || '',
+              name: formatPlayerNameForDisplay(player.name || player.shortName || ''),
               teamAbbreviation: team.abbreviation || '',
               teamNameZhCN: getTeamNameZhCn(team.name),
               competitionId: gameId,
@@ -421,7 +422,7 @@ class NBAService {
               } else {
                 const player = {
                   id: playerId,
-                  name: athlete.fullName || athlete.displayName || athlete.shortName || '',
+                  name: formatPlayerNameForDisplay(athlete.fullName || athlete.displayName || athlete.shortName || ''),
                   team: teamName,
                   teamNameZhCN: getTeamNameZhCn(competitor.team.name),
                   teamAbbreviation: teamAbbreviation,

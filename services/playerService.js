@@ -4,6 +4,7 @@
  */
 
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+const { formatPlayerNameForDisplay } = require('../utils/playerName');
 
 class PlayerService {
   constructor() {
@@ -397,7 +398,7 @@ class PlayerService {
         id: athlete.id,
         firstName: athlete.firstName || null,
         lastName: athlete.lastName || null,
-        name: athlete.displayName || athlete.fullName || athlete.shortName || 'Unknown',
+        name: formatPlayerNameForDisplay(athlete.displayName || athlete.fullName || athlete.shortName || 'Unknown'),
         photo: athlete.headshot?.href || null,
         team: athlete.team ? {
           id: athlete.team.id,

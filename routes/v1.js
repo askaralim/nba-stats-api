@@ -14,6 +14,7 @@ const playerService = require('../services/playerService');
 const gameTransformer = require('../utils/gameTransformer');
 const { paginateArray, createPaginationMeta, paginationMiddleware } = require('../middleware/pagination');
 const { standardRateLimiter, strictRateLimiter } = require('../middleware/rateLimiter');
+const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const {
   validateGameId,
   validateDate,
@@ -372,7 +373,7 @@ router.get('/nba/teams/:teamAbbreviation',
           if (!playersMap.has(playerId)) {
             playersMap.set(playerId, {
               id: playerId,
-              name: athlete.fullName || athlete.displayName || athlete.shortName || 'Unknown',
+              name: formatPlayerNameForDisplay(athlete.fullName || athlete.displayName || athlete.shortName || 'Unknown'),
               position: athlete.position?.abbreviation || athlete.position?.name || '-',
               headshot: athlete.headshot?.href || null,
               stats: {}

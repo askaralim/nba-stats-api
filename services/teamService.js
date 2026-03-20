@@ -5,6 +5,7 @@
 
 const dateFormatter = require('../utils/dateFormatter');
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+const { formatPlayerNameForDisplay } = require('../utils/playerName');
 
 class TeamService {
   constructor() {
@@ -101,7 +102,7 @@ class TeamService {
 
       const roster = athletes.map((a) => ({
         id: a.id,
-        name: a.fullName || a.displayName || a.shortName || 'Unknown',
+        name: formatPlayerNameForDisplay(a.fullName || a.displayName || a.shortName || 'Unknown'),
         position: a.position?.abbreviation || a.position?.name || null,
         jersey: a.jersey ? String(a.jersey) : null,
         headshot: a.headshot?.href || null
@@ -380,7 +381,7 @@ class TeamService {
           if (!player) {
             player = {
               id: playerId,
-              name: athlete.fullName || athlete.displayName || athlete.shortName || 'Unknown',
+              name: formatPlayerNameForDisplay(athlete.fullName || athlete.displayName || athlete.shortName || 'Unknown'),
               position: athlete.position?.abbreviation || athlete.position?.name || '-',
               jersey: athlete.jersey ? String(athlete.jersey) : '',
               headshot: athlete.headshot?.href || null,

@@ -5,6 +5,7 @@
 
 const dateFormatter = require('./dateFormatter');
 const { getTeamNameZhCn, getTeamCityZhCn } = require('./teamTranslations');
+const { formatPlayerNameForDisplay } = require('./playerName');
 
 class GameTransformer {
   /**
@@ -120,6 +121,7 @@ class GameTransformer {
       ['OKC', 'DEN'], ['DEN', 'OKC'],
       ['OKC', 'SA'], ['SA', 'OKC'],
       ['DEN', 'SA'], ['SA', 'DEN'],
+      ['BOS', 'SA'], ['SA', 'BOS'],
     ];
     
     const matchup = [awayAbbr, homeAbbr];
@@ -272,6 +274,7 @@ class GameTransformer {
       if ((isLive && isMarquee) || 
           (isLive && isClosest) || 
           (isLive && isOT) || 
+          isMarquee || 
           isClosest || 
           isOT) {
         // Determine featured reason
@@ -824,7 +827,7 @@ class GameTransformer {
               }
             });
             allPlayers.push({
-              name: athlete?.displayName || athlete?.shortName || '',
+              name: formatPlayerNameForDisplay(athlete?.displayName || athlete?.shortName || ''),
               points: parseInt(statsMap.points || 0),
               teamId: teamPlayerData.team?.id
             });
@@ -997,7 +1000,7 @@ class GameTransformer {
         allPlayers.push({
           teamId: String(team.id), // Keep teamId for filtering, but use standardized team reference
           athleteId: athlete?.id,
-          name: athlete?.displayName || athlete?.shortName || '',
+          name: formatPlayerNameForDisplay(athlete?.displayName || athlete?.shortName || ''),
           shortName: athlete?.shortName || '',
           jersey: athlete?.jersey || '',
           position: athlete?.position?.abbreviation || athlete?.position?.name || '',
@@ -1220,7 +1223,7 @@ class GameTransformer {
         
         gameMVP = {
           athleteId: player.athleteId,
-          name: player.name,
+          name: formatPlayerNameForDisplay(player.name || ''),
           shortName: player.shortName,
           jersey: player.jersey,
           position: player.position,
@@ -1836,7 +1839,7 @@ class GameTransformer {
 
         const injuryData = {
           playerId: playerId,
-          name: playerName,
+          name: formatPlayerNameForDisplay(playerName || ''),
           headshot: headshot,
           position: athlete.position?.abbreviation || athlete.position?.name || '',
           status: status,
