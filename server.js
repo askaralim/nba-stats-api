@@ -10,6 +10,7 @@ const newsIngestionService = require('./services/newsIngestionService');
 const newsTranslationService = require('./services/newsTranslationService');
 const playerService = require('./services/playerService');
 const gameTransformer = require('./utils/gameTransformer');
+const pushNotificationService = require('./services/pushNotificationService');
 
 // Middleware
 const corsMiddleware = require('./middleware/cors');
@@ -174,12 +175,22 @@ class WebServer {
       }
     });
 
+    // Push notifications: close games (last 5 min Q4+) + MVP GIS when a game ends
+    cron.schedule('* * * * *', async () => {
+      try {
+        await pushNotificationService.runScheduledChecks();
+      } catch (error) {
+        console.error('[Cron] ✗ Push notification check failed:', error);
+      }
+    });
+
     console.log('Cron jobs initialized:');
     console.log('  - News ingestion: every 5 minutes');
     console.log('  - News translation: every 3 minutes');
     console.log('  - Today\'s Games: every 2 minutes');
     console.log('  - Standings: every 30 minutes');
     console.log('  - Team Info: every 30 minutes');
+    console.log('  - Push alerts (close game / MVP GIS): every minute');
   }
 
   setupRoutes() {

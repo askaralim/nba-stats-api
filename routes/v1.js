@@ -36,6 +36,7 @@ const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations'
 // Usage: responseCache.get(cacheKey, ttlMs) / responseCache.set(cacheKey, data, ttlMs)
 // Example: const cached = responseCache.get(`game_${gameId}`, 60 * 1000); // 1 min cache
 const responseCache = require('../services/responseCache');
+const pushNotificationService = require('../services/pushNotificationService');
 
 // Apply pagination middleware to all list endpoints
 router.use('/nba/games/today', paginationMiddleware);
@@ -697,6 +698,18 @@ router.get('/nba/players/:playerId/gamelog',
     const { playerId } = req.params;
     const last5Games = await playerService.getPlayerLast5Games(playerId);
     sendSuccess(res, last5Games, null, 200, { version: 'v1' });
+  })
+);
+
+// Register Expo push token (Swish mobile app)
+router.post('/notifications/register',
+  asyncHandler(async (req, res) => {
+    const { token, platform } = req.body || {};
+    if (!token || typeof token !== 'string' || token.length < 25 || token.length > 512) {
+      throw new ValidationError('Missing or invalid push token');
+    }
+    pushNotificationService.registerToken(token, typeof platform === 'string' ? platform : '');
+    sendSuccess(res, { registered: true }, null, 200, { version: 'v1' });
   })
 );
 
