@@ -4,6 +4,7 @@
  */
 
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+const seasonDefaults = require('../config/seasonDefaults');
 
 class StandingsService {
   constructor() {
@@ -100,8 +101,8 @@ class StandingsService {
    */
   async getStandings(options = {}) {
     const {
-      season = 2026,
-      seasonType = 2
+      season = seasonDefaults.STANDINGS_YEAR,
+      seasonType = seasonDefaults.STANDINGS_TYPE
     } = options;
 
     const cacheKey = `standings_${season}_${seasonType}`;

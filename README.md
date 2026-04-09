@@ -84,6 +84,12 @@ CORS_ORIGIN=http://localhost:5173
 - The project uses `dotenv` to automatically load environment variables from `.env` file
 - For production (Railway), set environment variables in the Railway dashboard instead of using `.env`
 
+### Push notifications (Swish / Expo)
+
+- `POST /api/v1/notifications/register` stores Expo push tokens. With **PostgreSQL** configured, tokens persist in table `push_tokens` (run `migrations/003_create_push_tokens.sql` on your DB). Without a DB, tokens are kept in memory only (lost on restart; not shared across instances).
+- `DISABLE_PUSH_CRON=true` disables the minutely job that sends “close game” and “MVP GIS” alerts—useful until APNs/Expo delivery is verified.
+- Season defaults for standings / ESPN stats scraping: `config/seasonDefaults.js` or env `NBA_STANDINGS_SEASON_YEAR`, `NBA_STANDINGS_SEASON_TYPE`, `NBA_ESPN_STATS_SEASON`.
+
 ### Running
 
 **Development:**

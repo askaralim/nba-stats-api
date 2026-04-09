@@ -11,6 +11,7 @@ const newsTranslationService = require('./services/newsTranslationService');
 const playerService = require('./services/playerService');
 const gameTransformer = require('./utils/gameTransformer');
 const pushNotificationService = require('./services/pushNotificationService');
+const seasonDefaults = require('./config/seasonDefaults');
 
 // Middleware
 const corsMiddleware = require('./middleware/cors');
@@ -94,7 +95,7 @@ class WebServer {
 
     // 2. Current Season Standings - Commonly accessed
     console.log('  → Pre-fetching current season standings...');
-    standingsService.getStandings({ season: 2026, seasonType: 2 }).catch(err => {
+    standingsService.getStandings({ season: seasonDefaults.STANDINGS_YEAR, seasonType: seasonDefaults.STANDINGS_TYPE }).catch(err => {
       console.error('  ✗ Failed to fetch standings on startup:', err);
     });
 
@@ -157,7 +158,7 @@ class WebServer {
     cron.schedule('*/30 * * * *', async () => {
       console.log('[Cron] Refreshing standings (scheduled every 30 minutes)...');
       try {
-        await standingsService.getStandings({ season: 2026, seasonType: 2 });
+        await standingsService.getStandings({ season: seasonDefaults.STANDINGS_YEAR, seasonType: seasonDefaults.STANDINGS_TYPE });
         console.log('[Cron] ✓ Standings refreshed successfully');
       } catch (error) {
         console.error('[Cron] ✗ Failed to refresh standings:', error);
@@ -175,7 +176,8 @@ class WebServer {
       }
     });
 
-    // Push notifications: close games (last 5 min Q4+) + MVP GIS when a game ends
+    // Push notifications: close games (last 5 min Q4+) + MVP GIS when a game ends.
+    // Set DISABLE_PUSH_CRON=true in production until Expo/APNs delivery is verified end-to-end.
     cron.schedule('* * * * *', async () => {
       try {
         await pushNotificationService.runScheduledChecks();
@@ -190,7 +192,7 @@ class WebServer {
     console.log('  - Today\'s Games: every 2 minutes');
     console.log('  - Standings: every 30 minutes');
     console.log('  - Team Info: every 30 minutes');
-    console.log('  - Push alerts (close game / MVP GIS): every minute');
+    console.log('  - Push alerts (close game / MVP GIS): every minute (set DISABLE_PUSH_CRON=true to disable)');
   }
 
   setupRoutes() {
