@@ -31,11 +31,13 @@ const {
   ExternalAPIError
 } = require('../middleware/errorHandler');
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
+const seasonDefaults = require('../config/seasonDefaults');
 
 // Response cache for endpoint-level caching (reusable across all endpoints)
 // Usage: responseCache.get(cacheKey, ttlMs) / responseCache.set(cacheKey, data, ttlMs)
 // Example: const cached = responseCache.get(`game_${gameId}`, 60 * 1000); // 1 min cache
 const responseCache = require('../services/responseCache');
+const pushNotificationService = require('../services/pushNotificationService');
 
 // Apply pagination middleware to all list endpoints
 router.use('/nba/games/today', paginationMiddleware);
@@ -43,6 +45,14 @@ router.use('/nba/stats/players', paginationMiddleware);
 router.use('/nba/news', paginationMiddleware);
 router.use('/nba/teams/:teamAbbreviation/schedule', paginationMiddleware);
 router.use('/nba/teams/:teamAbbreviation/recent-games', paginationMiddleware);
+
+// Remote client flags (e.g. show ESPN headshots after App Review without a new binary)
+router.get('/app/config',
+  asyncHandler(async (req, res) => {
+    const showPlayerHeadshots = process.env.SHOW_PLAYER_HEADSHOTS === 'true';
+    sendSuccess(res, { showPlayerHeadshots }, null, 200, { version: 'v1' });
+  })
+);
 
 // Get games for a specific date (defaults to today) - WITH PAGINATION
 router.get('/nba/games/today',
@@ -250,7 +260,7 @@ router.get('/nba/stats/players',
   validatePagination,
   asyncHandler(async (req, res) => {
     const {
-      season = '2026|2',
+      season = seasonDefaults.ESPN_PLAYER_STATS_SEASON,
       position = 'all-positions',
       conference = '0',
       page = '1',
@@ -292,18 +302,16 @@ router.get('/nba/teams',
   })
 );
 
-// Get NBA standings
 router.get('/nba/standings',
-// Get NBA standings
   asyncHandler(async (req, res) => {
     const {
-      season = '2026',
-      seasonType = '2'
+      season = String(seasonDefaults.STANDINGS_YEAR),
+      seasonType = String(seasonDefaults.STANDINGS_TYPE)
     } = req.query;
     
     const options = {
-      season: parseInt(season) || 2026,
-      seasonType: parseInt(seasonType) || 2
+      season: parseInt(season, 10) || seasonDefaults.STANDINGS_YEAR,
+      seasonType: parseInt(seasonType, 10) || seasonDefaults.STANDINGS_TYPE
     };
     
     const standingsData = await standingsService.getStandings(options);
@@ -573,7 +581,7 @@ router.get('/nba/todayTopPerformers',
 router.get('/nba/seasonLeaders',
   asyncHandler(async (req, res) => {
     const seasonLeaders = await espnScraperService.getPlayerStats({
-      season: '2026|2',
+      season: seasonDefaults.ESPN_PLAYER_STATS_SEASON,
       limit: 100,
       sort: 'offensive.avgPoints:desc'
     });
@@ -697,6 +705,18 @@ router.get('/nba/players/:playerId/gamelog',
     const { playerId } = req.params;
     const last5Games = await playerService.getPlayerLast5Games(playerId);
     sendSuccess(res, last5Games, null, 200, { version: 'v1' });
+  })
+);
+
+// Register Expo push token (Swish mobile app)
+router.post('/notifications/register',
+  asyncHandler(async (req, res) => {
+    const { token, platform } = req.body || {};
+    if (!token || typeof token !== 'string' || token.length < 25 || token.length > 512) {
+      throw new ValidationError('Missing or invalid push token');
+    }
+    await pushNotificationService.registerToken(token, typeof platform === 'string' ? platform : '');
+    sendSuccess(res, { registered: true }, null, 200, { version: 'v1' });
   })
 );
 

@@ -5,6 +5,7 @@
 
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
+const seasonDefaults = require('../config/seasonDefaults');
 
 class ESPNScraperService {
   constructor() {
@@ -40,12 +41,16 @@ class ESPNScraperService {
    */
   parseSeason(season) {
     if (!season) {
-      return { year: 2026, seasonType: 2 }; // Default to current regular season
+      const parts = seasonDefaults.ESPN_PLAYER_STATS_SEASON.split('|');
+      return {
+        year: parseInt(parts[0], 10) || seasonDefaults.STANDINGS_YEAR,
+        seasonType: parts[1] ? parseInt(parts[1], 10) : seasonDefaults.STANDINGS_TYPE
+      };
     }
 
     const parts = season.split('|');
-    const year = parseInt(parts[0]) || 2026;
-    const seasonType = parts[1] ? parseInt(parts[1]) : 2; // Default to regular season
+    const year = parseInt(parts[0], 10) || seasonDefaults.STANDINGS_YEAR;
+    const seasonType = parts[1] ? parseInt(parts[1], 10) : seasonDefaults.STANDINGS_TYPE;
 
     return { year, seasonType };
   }
@@ -265,7 +270,7 @@ class ESPNScraperService {
    */
   async getPlayerStats(options = {}) {
     const {
-      season = '2026|2',
+      season = seasonDefaults.ESPN_PLAYER_STATS_SEASON,
       position = 'all-positions',
       conference = '0', // Not used in ESPN API but kept for compatibility
       page = 1,
