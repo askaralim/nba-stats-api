@@ -11,8 +11,11 @@ const STANDINGS_YEAR = parseInt(process.env.NBA_STANDINGS_SEASON_YEAR, 10) || 20
 const STANDINGS_TYPE = parseInt(process.env.NBA_STANDINGS_SEASON_TYPE, 10) || 2;
 const ESPN_PLAYER_STATS_SEASON = process.env.NBA_ESPN_STATS_SEASON || '2026|2';
 
+const LEADERS_API_URL = 'https://site.web.api.espn.com/apis/site/v3/sports/basketball/nba/leaders';
+
 module.exports = {
   STANDINGS_YEAR,
   STANDINGS_TYPE,
   ESPN_PLAYER_STATS_SEASON,
+  LEADERS_API_URL,
 };

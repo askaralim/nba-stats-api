@@ -38,6 +38,7 @@ const seasonDefaults = require('../config/seasonDefaults');
 // Example: const cached = responseCache.get(`game_${gameId}`, 60 * 1000); // 1 min cache
 const responseCache = require('../services/responseCache');
 const pushNotificationService = require('../services/pushNotificationService');
+const seasonTypeCache = require('../services/seasonTypeCache');
 
 // Apply pagination middleware to all list endpoints
 router.use('/nba/games/today', paginationMiddleware);
@@ -577,49 +578,56 @@ router.get('/nba/todayTopPerformers',
   })
 );
 
-// Get season leaders (top 3 in points, rebounds, assists)
+// Get season leaders (top 3 PTS / REB / AST) — ESPN leaders API + seasonMeta for client toggle
 router.get('/nba/seasonLeaders',
   asyncHandler(async (req, res) => {
-    const seasonLeaders = await espnScraperService.getPlayerStats({
-      season: seasonDefaults.ESPN_PLAYER_STATS_SEASON,
-      limit: 100,
-      sort: 'offensive.avgPoints:desc'
+    let seasontype;
+    if (req.query.seasontype !== undefined && req.query.seasontype !== '') {
+      const n = parseInt(String(req.query.seasontype), 10);
+      if (Number.isNaN(n) || (n !== 2 && n !== 3)) {
+        throw new ValidationError('seasontype must be 2 (regular) or 3 (postseason)');
+      }
+      seasontype = n;
+    }
+
+    let leaders;
+    try {
+      leaders = await espnScraperService.getLeaders({ seasontype, limit: 5 });
+    } catch (err) {
+      if (seasontype !== 3) throw err;
+      const postseasonAvailable = await espnScraperService.getPostseasonAvailableCached();
+      leaders = {
+        points: [],
+        rebounds: [],
+        assists: [],
+        seasonMeta: seasonTypeCache.buildSeasonMeta(3, postseasonAvailable),
+      };
+    }
+    const { seasonMeta, points = [], rebounds = [], assists = [] } = leaders;
+
+    const mapRow = (player, statKey) => ({
+      id: player.id,
+      name: player.name,
+      team: player.team,
+      teamNameZhCN: player.teamNameZhCN,
+      teamAbbreviation: player.teamAbbreviation || null,
+      headshot: player.headshot,
+      value: player.value,
+      statType: statKey
     });
-    
-    const topSeasonLeaders = {
-      points: (seasonLeaders.topPlayersByStat?.avgPoints?.players || []).slice(0, 3).map(player => ({
-        id: player.id,
-        name: player.name,
-        team: player.team,
-        teamNameZhCN: player.teamNameZhCN,
-        teamAbbreviation: player.teamLogo ? player.teamLogo.split('/').pop().split('.')[0].toUpperCase() : null,
-        headshot: player.headshot,
-        value: player.stats?.avgPoints?.displayValue || player.stats?.avgPoints?.value || '-',
-        statType: 'avgPoints'
-      })),
-      rebounds: (seasonLeaders.topPlayersByStat?.avgRebounds?.players || []).slice(0, 3).map(player => ({
-        id: player.id,
-        name: player.name,
-        team: player.team,
-        teamNameZhCN: player.teamNameZhCN,
-        teamAbbreviation: player.teamLogo ? player.teamLogo.split('/').pop().split('.')[0].toUpperCase() : null,
-        headshot: player.headshot,
-        value: player.stats?.avgRebounds?.displayValue || player.stats?.avgRebounds?.value || '-',
-        statType: 'avgRebounds'
-      })),
-      assists: (seasonLeaders.topPlayersByStat?.avgAssists?.players || []).slice(0, 3).map(player => ({
-        id: player.id,
-        name: player.name,
-        team: player.team,
-        teamNameZhCN: player.teamNameZhCN,
-        teamAbbreviation: player.teamLogo ? player.teamLogo.split('/').pop().split('.')[0].toUpperCase() : null,
-        headshot: player.headshot,
-        value: player.stats?.avgAssists?.displayValue || player.stats?.avgAssists?.value || '-',
-        statType: 'avgAssists'
-      }))
-    };
-    
-    sendSuccess(res, topSeasonLeaders, null, 200, { version: 'v1' });
+
+    sendSuccess(
+      res,
+      {
+        points: points.slice(0, 3).map((p) => mapRow(p, 'avgPoints')),
+        rebounds: rebounds.slice(0, 3).map((p) => mapRow(p, 'avgRebounds')),
+        assists: assists.slice(0, 3).map((p) => mapRow(p, 'avgAssists')),
+        seasonMeta
+      },
+      null,
+      200,
+      { version: 'v1' }
+    );
   })
 );
 

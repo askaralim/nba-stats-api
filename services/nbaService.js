@@ -7,6 +7,7 @@ const gameTransformer = require('../utils/gameTransformer');
 const { fetchWithRetry } = require('../utils/retry');
 const { getTeamNameZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
+const seasonTypeCache = require('./seasonTypeCache');
 
 class NBAService {
   constructor() {
@@ -94,7 +95,10 @@ class NBAService {
       }
 
       const data = await response.json();
-      
+
+      // Update season type cache from scoreboard response
+      seasonTypeCache.updateFromResponse(data);
+
       // Cache the response
       this.cache.set(cacheKey, {
         data,
