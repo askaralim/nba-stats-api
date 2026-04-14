@@ -323,9 +323,11 @@ ${overtimeSection}
       throw new Error('Content is required for translation');
     }
 
+    const noPromoLinksInstruction =
+    '\n\nImportant: Do not include promotional or tracking short links in your translation (e.g. nba.smart.link/…, other smart.link URLs, or bare app/watch CTAs that are only URLs). Remove them entirely from translated_title and translated_content. If the source ends with symbols like ➡️ or text that only points to such a link, end the Chinese sentence naturally without any URL.';
     const userPrompt = title
-      ? `Translate the following NBA news to Simplified Chinese. Keep it professional, accurate, and fluent.\n\nTitle: ${title}\n\nContent:\n${content}\n\nRespond with JSON only: { "translated_title": "...", "translated_content": "..." }`
-      : `Translate the following NBA news to Simplified Chinese. Keep it professional, accurate, and fluent.\n\nContent:\n${content}\n\nRespond with JSON only: { "translated_title": "...", "translated_content": "..." }. Use the first sentence or a short summary as translated_title if no title is given.`;
+    ? `Translate the following NBA news to Simplified Chinese. Keep it professional, accurate, and fluent.${noPromoLinksInstruction}\n\nTitle: ${title}\n\nContent:\n${content}\n\nRespond with JSON only: { "translated_title": "...", "translated_content": "..." }`
+    : `Translate the following NBA news to Simplified Chinese. Keep it professional, accurate, and fluent.${noPromoLinksInstruction}\n\nContent:\n${content}\n\nRespond with JSON only: { "translated_title": "...", "translated_content": "..." }. Use the first sentence or a short summary as translated_title if no title is given.`;
 
     try {
       const response = await axios.post(
@@ -335,7 +337,8 @@ ${overtimeSection}
           messages: [
             {
               role: 'system',
-              content: '你是一个专业的体育新闻翻译。将英文NBA新闻翻译成简体中文，保持专业、准确、流畅。只输出JSON，不要其他文字。'
+              content: '你是一个专业的体育新闻翻译。将英文NBA新闻翻译成简体中文，保持专业、准确、流畅。译文标题和正文中不要保留营销推广类短链接（例如 nba.smart.link/ 等）；删除这类链接及仅用于引流的符号（如 ➡️），必要时改写使语句通顺。只输出JSON，不要其他文字。'
+
             },
             {
               role: 'user',

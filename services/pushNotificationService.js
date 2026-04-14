@@ -9,7 +9,7 @@
  *
  * Env:
  * - DISABLE_PUSH_CRON=true — skip scheduled push checks (use until APNs/Expo push is validated).
- * - PUSH_MVP_MIN_GIS — minimum GIS to send “本场最佳” (default 12).
+ * - PUSH_MVP_MIN_GIS — minimum GIS to send “本场最佳” (default 30).
  */
 
 const db = require('../config/db');
@@ -216,7 +216,7 @@ async function runScheduledChecks() {
       const key = `${dateKey}_${gameId}_mvp`;
       if (!mvpNotified.has(key)) {
         const top = await getTopGisPlayerForGame(gameId);
-        const minGis = Number(process.env.PUSH_MVP_MIN_GIS) || 12;
+        const minGis = Number(process.env.PUSH_MVP_MIN_GIS) || 30;
         if (top && top.gis >= minGis) {
           mvpNotified.add(key);
           await broadcastToAll(
