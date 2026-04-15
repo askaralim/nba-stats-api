@@ -68,6 +68,7 @@ class GameTransformer {
       gameEt: game.gameEt,
       gameEtFormatted: gameEtFormatted, // Formatted date for display
       period: game.period,
+      gameClock: game.gameClock || '',
       // Filter flags for frontend filtering
       isOvertime,
       isClosest,

@@ -10,6 +10,7 @@
  * Env:
  * - DISABLE_PUSH_CRON=true — skip scheduled push checks (use until APNs/Expo push is validated).
  * - PUSH_MVP_MIN_GIS — minimum GIS to send “本场最佳” (default 30).
+ * - PUSH_CLOSE_GAME_MAX_MARGIN — max |away−home| to treat as “胶着” for close-game pushes (default 4 = only if margin < 5).
  */
 
 const db = require('../config/db');
@@ -185,8 +186,15 @@ async function runScheduledChecks() {
     return;
   }
 
-  const transformed = gameTransformer.transformScoreboard(scoreboardData, true);
+  // Full games (not minimized): need gameClock + scores for close-game logic.
+  const transformed = gameTransformer.transformScoreboard(scoreboardData, false);
   const games = transformed.games || [];
+
+  const closeGameMaxMargin =
+    Number.isFinite(Number(process.env.PUSH_CLOSE_GAME_MAX_MARGIN)) &&
+    Number(process.env.PUSH_CLOSE_GAME_MAX_MARGIN) >= 0
+      ? Number(process.env.PUSH_CLOSE_GAME_MAX_MARGIN)
+      : 4;
 
   for (const game of games) {
     const gameId = game.gameId;
@@ -194,20 +202,40 @@ async function runScheduledChecks() {
 
     const away = game.awayTeam?.abbreviation || '';
     const home = game.homeTeam?.abbreviation || '';
-    const label = `${away} @ ${home}`;
 
     if (game.gameStatus === 2 && game.period >= 4) {
       const sec = parseClockToSeconds(game.gameClock);
-      if (sec !== null && sec <= 300) {
+      const awayScore = game.awayTeam?.score;
+      const homeScore = game.homeTeam?.score;
+      const a =
+        awayScore !== undefined && awayScore !== null && awayScore !== ''
+          ? Number(awayScore)
+          : NaN;
+      const h =
+        homeScore !== undefined && homeScore !== null && homeScore !== ''
+          ? Number(homeScore)
+          : NaN;
+
+      if (
+        sec !== null &&
+        sec <= 300 &&
+        Number.isFinite(a) &&
+        Number.isFinite(h) &&
+        Math.abs(a - h) <= closeGameMaxMargin
+      ) {
         const key = `${dateKey}_${gameId}_close`;
         if (!closeGameAlerted.has(key)) {
           closeGameAlerted.add(key);
-          await broadcastToAll(
-            '末节关键时刻',
-            `${label} 剩余不到 5 分钟，比分仍胶着。点击查看`,
-            { type: 'close_game', gameId: String(gameId) }
-          );
-          console.log(`[Push] close-game alert ${gameId}`);
+          const margin = Math.abs(a - h);
+          const body = `${away} ${a} @ ${home} ${h}，分差${margin}分，末节剩余不足5分钟。点击查看`;
+          await broadcastToAll('末节关键时刻', body, {
+            type: 'close_game',
+            gameId: String(gameId),
+            awayScore: a,
+            homeScore: h,
+            margin,
+          });
+          console.log(`[Push] close-game alert ${gameId} ${away} ${a} @ ${home} ${h} margin=${margin}`);
         }
       }
     }
