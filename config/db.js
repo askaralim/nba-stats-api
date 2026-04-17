@@ -8,6 +8,7 @@
  */
 
 const { Pool } = require('pg');
+const { withSslForRailway } = require('./pgConnectionOptions');
 
 function getConnectionConfig() {
   const url = process.env.DATABASE_URL && process.env.DATABASE_URL.trim();
@@ -39,15 +40,24 @@ const isConfigured = Boolean(connectionConfig);
 let pool = null;
 
 if (isConfigured) {
-  pool = new Pool({
-    ...connectionConfig,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
-  });
+  pool = new Pool(
+    withSslForRailway({
+      ...connectionConfig,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    })
+  );
 
   pool.on('error', (err) => {
     console.error('[DB] Unexpected pool error:', err.message);
+  });
+
+  // Prevent process crash when the server closes an idle connection (client emits 'error').
+  pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      console.error('[DB] Client connection error (will be replaced in pool):', err.message);
+    });
   });
 }
 

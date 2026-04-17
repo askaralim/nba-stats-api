@@ -7,6 +7,7 @@ const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations'
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const seasonDefaults = require('../config/seasonDefaults');
 const seasonTypeCache = require('./seasonTypeCache');
+const leagueSeasonService = require('./leagueSeasonService');
 
 /** Cached result of “can we load playoff leaders?” probe (avoid hitting ESPN every request). */
 const POSTSEASON_PROBE_TTL_MS = 30 * 60 * 1000;
@@ -85,10 +86,11 @@ class ESPNScraperService {
   }
 
   /**
-   * Plan v3: show postseason toggle only when calendar is playoffs (cache type 3) AND leaders API returns data.
+   * ESPN-only: playoffs toggle when cache says postseason AND leaders probe has rows.
+   * Used when `league_seasons` has no current row (avoid DB read inside resolveSeasonMeta).
    * @returns {Promise<boolean>}
    */
-  async getPostseasonAvailableCached() {
+  async _getPostseasonAvailableEspnOnly() {
     const current = seasonTypeCache.get();
     if (!current || current.type !== 3) {
       return false;
@@ -107,6 +109,19 @@ class ESPNScraperService {
     }
     postseasonProbeCache = { value: ok, at: Date.now() };
     return ok;
+  }
+
+  /**
+   * @param {number} requestedSeasonTypeForMeta - type id to expose as requested* (from leaders response or effective fetch)
+   * @returns {Promise<object>} seasonMeta
+   */
+  async resolveSeasonMeta(requestedSeasonTypeForMeta) {
+    const row = await leagueSeasonService.getCurrentSeasonRow();
+    if (row) {
+      return leagueSeasonService.seasonMetaFromRow(row, requestedSeasonTypeForMeta);
+    }
+    const postseasonAvailable = await this._getPostseasonAvailableEspnOnly();
+    return seasonTypeCache.buildSeasonMeta(requestedSeasonTypeForMeta, postseasonAvailable);
   }
 
   /**
@@ -308,7 +323,11 @@ class ESPNScraperService {
     const cacheKey = `espn_stats_leaders_${year}_${requestedSeasonType}_${position || 'all'}_${page}_${leadersLimit}_${sort}`;
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      return cached.data;
+      const payload = cached.data;
+      const id = payload?.metadata?.seasonTypeId;
+      const typeForMeta = Number.isFinite(id) ? id : requestedSeasonType;
+      const seasonMeta = await this.resolveSeasonMeta(typeForMeta);
+      return { ...payload, seasonMeta };
     }
 
     try {
@@ -318,7 +337,7 @@ class ESPNScraperService {
 
       const effectiveSeasonType = this.seasonTypeIdFromLeadersData(data);
       const topPlayersByStat = this.buildTopPlayersByStatFromLeadersData(data, topN);
-      const postseasonAvailable = await this.getPostseasonAvailableCached();
+      const seasonMeta = await this.resolveSeasonMeta(effectiveSeasonType);
 
       const categories = data.leaders?.categories || [];
       const maxLeaders = categories.reduce(
@@ -335,7 +354,7 @@ class ESPNScraperService {
           totalCount: maxLeaders,
         },
         topPlayersByStat,
-        seasonMeta: seasonTypeCache.buildSeasonMeta(effectiveSeasonType, postseasonAvailable),
+        seasonMeta,
       };
 
       this.cache.set(cacheKey, {
@@ -366,7 +385,11 @@ class ESPNScraperService {
     const cached = this.cache.get(cacheKey);
 
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      return cached.data;
+      const payload = cached.data;
+      const rt = payload?.seasonMeta?.requestedSeasonType;
+      const typeForMeta = Number.isFinite(rt) ? rt : seasontype ?? 2;
+      const seasonMeta = await this.resolveSeasonMeta(typeForMeta);
+      return { ...payload, seasonMeta };
     }
 
     try {
@@ -411,8 +434,7 @@ class ESPNScraperService {
 
       const requestedSeasonType = this.seasonTypeIdFromLeadersData(data);
 
-      const postseasonAvailable = await this.getPostseasonAvailableCached();
-      const seasonMeta = seasonTypeCache.buildSeasonMeta(requestedSeasonType, postseasonAvailable);
+      const seasonMeta = await this.resolveSeasonMeta(requestedSeasonType);
 
       const result = {
         ...transformedLeaders,
@@ -432,14 +454,6 @@ class ESPNScraperService {
     }
   }
 
-  /**
-   * Check if postseason leaders data is available.
-   * Attempts to fetch leaders with seasontype=3.
-   * @returns {Promise<boolean>}
-   */
-  async checkPostseasonAvailable() {
-    return this.getPostseasonAvailableCached();
-  }
 }
 
 module.exports = new ESPNScraperService();

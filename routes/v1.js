@@ -38,7 +38,7 @@ const seasonDefaults = require('../config/seasonDefaults');
 // Example: const cached = responseCache.get(`game_${gameId}`, 60 * 1000); // 1 min cache
 const responseCache = require('../services/responseCache');
 const pushNotificationService = require('../services/pushNotificationService');
-const seasonTypeCache = require('../services/seasonTypeCache');
+const leagueSeasonService = require('../services/leagueSeasonService');
 
 // Apply pagination middleware to all list endpoints
 router.use('/nba/games/today', paginationMiddleware);
@@ -51,7 +51,10 @@ router.use('/nba/teams/:teamAbbreviation/recent-games', paginationMiddleware);
 router.get('/app/config',
   asyncHandler(async (req, res) => {
     const showPlayerHeadshots = process.env.SHOW_PLAYER_HEADSHOTS === 'true';
-    sendSuccess(res, { showPlayerHeadshots }, null, 200, { version: 'v1' });
+    // Always read DB for config (no short-TTL cache) so clients see `leagueSeason` right after ops flips `is_current`.
+    const row = await leagueSeasonService.getCurrentSeasonRow({ skipCache: true });
+    const leagueSeason = row ? leagueSeasonService.toAppConfigShape(row) : null;
+    sendSuccess(res, { showPlayerHeadshots, leagueSeason }, null, 200, { version: 'v1' });
   })
 );
 
@@ -595,12 +598,11 @@ router.get('/nba/seasonLeaders',
       leaders = await espnScraperService.getLeaders({ seasontype, limit: 5 });
     } catch (err) {
       if (seasontype !== 3) throw err;
-      const postseasonAvailable = await espnScraperService.getPostseasonAvailableCached();
       leaders = {
         points: [],
         rebounds: [],
         assists: [],
-        seasonMeta: seasonTypeCache.buildSeasonMeta(3, postseasonAvailable),
+        seasonMeta: await espnScraperService.resolveSeasonMeta(3),
       };
     }
     const { seasonMeta, points = [], rebounds = [], assists = [] } = leaders;

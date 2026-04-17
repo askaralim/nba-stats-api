@@ -7,6 +7,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "migrate": "node scripts/run-migrations.js",
+    "migrate:league-seasons": "node scripts/run-single-migration.js migrations/004_create_league_seasons.sql",
     "capture-espn-samples": "node scripts/capture-espn-samples.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

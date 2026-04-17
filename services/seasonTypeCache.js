@@ -12,9 +12,33 @@
  *   5 = Play-In Tournament
  */
 
+const { SEASON_TYPE_NAMES } = require('../config/seasonTypeNames');
+
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 let cached = null; // { type, name, year, updatedAt }
+
+/**
+ * Normalize ESPN season type field (number, string, or { type, id } object).
+ * @param {unknown} raw
+ * @returns {number|null}
+ */
+function normalizeSeasonTypeId(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof raw === 'object') {
+    const v = raw.type ?? raw.id;
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    const n = parseInt(String(v), 10);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
 
 /**
  * Extract season type from various ESPN API response shapes.
@@ -31,36 +55,44 @@ let cached = null; // { type, name, year, updatedAt }
 function extractSeasonType(data) {
   if (!data || typeof data !== 'object') return null;
 
-  // Pattern B – leaders API
-  if (data.currentSeason?.type) {
+  // Pattern B – leaders API (currentSeason.type may be object or number)
+  if (data.currentSeason?.type !== undefined && data.currentSeason?.type !== null) {
     const t = data.currentSeason.type;
-    if (typeof t === 'object' && t.type !== undefined) {
+    const typeId = normalizeSeasonTypeId(typeof t === 'object' ? t : { type: t });
+    if (typeId !== null) {
+      const name = typeof t === 'object' && t && typeof t.name === 'string' ? t.name : null;
       return {
-        type: Number(t.type),
-        name: t.name || null,
+        type: typeId,
+        name,
         year: data.currentSeason.year || null,
       };
     }
   }
 
-  // Pattern A / C – season.type as number
-  if (data.season?.type !== undefined) {
+  // Pattern A / C – season.type as number or nested object
+  if (data.season?.type !== undefined && data.season?.type !== null) {
     const s = data.season;
-    return {
-      type: Number(s.type),
-      name: s.name || null,
-      year: s.year || null,
-    };
+    const typeId = normalizeSeasonTypeId(s.type);
+    if (typeId !== null) {
+      return {
+        type: typeId,
+        name: typeof s.name === 'string' ? s.name : null,
+        year: s.year || null,
+      };
+    }
   }
 
   // Pattern D – leagues array
   if (Array.isArray(data.leagues) && data.leagues[0]?.season?.type !== undefined) {
     const s = data.leagues[0].season;
-    return {
-      type: Number(s.type),
-      name: s.name || null,
-      year: s.year || null,
-    };
+    const typeId = normalizeSeasonTypeId(s.type);
+    if (typeId !== null) {
+      return {
+        type: typeId,
+        name: typeof s.name === 'string' ? s.name : null,
+        year: s.year || null,
+      };
+    }
   }
 
   return null;
@@ -73,7 +105,7 @@ module.exports = {
    */
   updateFromResponse(espnData) {
     const extracted = extractSeasonType(espnData);
-    if (!extracted) return;
+    if (!extracted || !Number.isFinite(extracted.type)) return;
 
     cached = {
       ...extracted,
@@ -99,18 +131,6 @@ module.exports = {
     return { type: cached.type, name: cached.name, year: cached.year };
   },
 
-  /** @returns {boolean} */
-  isPostseason() {
-    const info = this.get();
-    return info?.type === 3;
-  },
-
-  /** @returns {boolean} */
-  isPlayIn() {
-    const info = this.get();
-    return info?.type === 5;
-  },
-
   /**
    * Build a seasonMeta object suitable for API responses.
    * @param {number} requestedSeasonType – the season type that was actually queried
@@ -119,13 +139,6 @@ module.exports = {
    */
   buildSeasonMeta(requestedSeasonType = 2, postseasonAvailable = false) {
     const current = this.get();
-    const SEASON_TYPE_NAMES = {
-      1: 'Pre-Season',
-      2: 'Regular Season',
-      3: 'Postseason',
-      4: 'Off-Season',
-      5: 'Play-In Season',
-    };
     return {
       currentSeasonType: current?.type ?? null,
       currentSeasonTypeName: current ? (current.name || SEASON_TYPE_NAMES[current.type] || 'Unknown') : null,

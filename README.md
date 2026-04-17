@@ -2,6 +2,8 @@
 
 RESTful API backend for NBA statistics application using ESPN APIs. Built with an **API-first architecture** where all data transformation and processing happens on the backend, providing clean, pre-processed data to the frontend.
 
+Monorepo documentation index: [`../docs/README.md`](../docs/README.md).
+
 ## Features
 
 - **API-First Design**: All data extraction, transformation, and caching centralized on backend
@@ -90,6 +92,17 @@ CORS_ORIGIN=http://localhost:5173
 - `DISABLE_PUSH_CRON=true` disables the minutely job that sends “close game” and “MVP GIS” alerts—useful until APNs/Expo delivery is verified.
 - Season defaults for standings / ESPN stats scraping: `config/seasonDefaults.js` or env `NBA_STANDINGS_SEASON_YEAR`, `NBA_STANDINGS_SEASON_TYPE`, `NBA_ESPN_STATS_SEASON`.
 
+### Database (PostgreSQL)
+
+Optional but recommended for production: **news v2**, **push tokens**, and **league calendar phase** (`league_seasons`).
+
+- **`DATABASE_URL`** (or `PGHOST` / `PGUSER` / `PGPASSWORD` / `PGDATABASE`) — see [`.env.example`](./.env.example). Railway public proxies (`*.rlwy.net`) use TLS; the pool applies `ssl` automatically via [`config/pgConnectionOptions.js`](./config/pgConnectionOptions.js).
+- **Migrations** (from repo root `nba-stats-api/`):
+  - `npm run migrate` — runs every `migrations/*.sql` in lexical order.
+  - `npm run migrate:league-seasons` — runs only [`migrations/004_create_league_seasons.sql`](./migrations/004_create_league_seasons.sql).
+- **`league_seasons`** — one row with `is_current = true` drives `seasonMeta` / postseason UI when present (see [`../docs/API_V1_SCHEMAS.md`](../docs/API_V1_SCHEMAS.md)). Flip phase with SQL `UPDATE` (examples in the migration file comments).
+- **`GET /api/v1/app/config`** — returns `leagueSeason` (ESPN-shaped summary) or `null` if no DB row / DB off.
+
 ### Running
 
 **Development:**
@@ -105,6 +118,8 @@ npm start
 Server runs on `http://localhost:3000` (or PORT from .env)
 
 ## API Endpoints
+
+**Versioning:** Prefer **`/api/v1/nba/...`** (wrapped `{ success, data, meta }`). Examples below show the legacy **`/api/nba/...`** path for historical compatibility; replace the prefix with `/api/v1` for new clients.
 
 ### Games
 
