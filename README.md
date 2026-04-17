@@ -528,10 +528,10 @@ The API returns data in consistent, well-structured formats. See frontend data m
    - `PORT`: Railway automatically provides this (no need to set manually)
 
 4. **Railway build (Nixpacks + Puppeteer)**  
-   Nixpacks sees **`puppeteer`** in `package.json` (used by [`services/newsService.js`](./services/newsService.js) for some Nitter instances) and runs a long **`apt-get install`** for Chromium and GUI libraries (`stage-0` in build logs). That is expected.  
-   - **Transient errors** (`Failed to fetch http://security.ubuntu.com/...`, many `Ign:` lines): Ubuntu mirror/network blips — **Redeploy** the service; often succeeds on retry.  
-   - **[`nixpacks.toml`](./nixpacks.toml)** sets `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD` and `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` so `npm install` does not also download Puppeteer’s bundled Chrome while the image already has system Chromium.  
-   - If Chromium lives elsewhere in a custom image, override **`PUPPETEER_EXECUTABLE_PATH`** in Railway Variables.
+   Nixpacks sees **`puppeteer`** in `package.json` (used by [`services/newsService.js`](./services/newsService.js) for some Nitter instances) and adds a **`apt-get install`** step for GUI libraries; builds can take several minutes.  
+   - **Transient errors** (`Failed to fetch http://security.ubuntu.com/...`, many `Ign:` lines): Ubuntu mirror/network blips — **Redeploy**; often succeeds on retry.  
+   - **`Unable to locate package chromium`**: Railway’s **Nixpacks Ubuntu image** (or its apt indexes) can change so the **`chromium`** deb Nixpacks hardcodes is no longer available. **[`nixpacks.toml`](./nixpacks.toml)** replaces that apt list with the **same libs without `chromium`**; **`npm ci`** then uses **Puppeteer’s downloaded Chrome** (leave **`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD`** unset in Railway unless you supply a working **`PUPPETEER_EXECUTABLE_PATH`** yourself).  
+   - Optional: if you run a image that *does* ship system Chromium, set **`PUPPETEER_EXECUTABLE_PATH`** (and **`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true`**) in Railway Variables; [`newsService.js`](./services/newsService.js) reads `executablePath` from the environment.
 
 5. **Get Your API URL**:
    - Railway will provide a URL like: `https://your-app-name.up.railway.app`

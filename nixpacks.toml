@@ -1,6 +1,19 @@
-# Railway / Nixpacks: Puppeteer is detected and triggers a large apt Chromium stack.
-# Skip downloading a second bundled browser during npm install; use the system
-# Chromium from Nixpacks’ apt phase (see README “Railway build”).
-[variables]
-PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
-PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+# Puppeteer: Nixpacks’ Node provider always adds apt `chromium` plus GUI libs.
+# Recent Railway Nixpacks Ubuntu images often fail with “Unable to locate package
+# chromium” (image/apt sources changed — not your app). We replace that apt set
+# with the same libraries only; Puppeteer then downloads its bundled Chrome at
+# `npm ci` (do not set PUPPETEER_SKIP_CHROMIUM_DOWNLOAD in Railway for this path).
+[phases.setup]
+aptPkgs = [
+  "libnss3",
+  "libatk1.0-0",
+  "libatk-bridge2.0-0",
+  "libcups2",
+  "libgbm1",
+  "libasound2t64",
+  "libpangocairo-1.0-0",
+  "libxss1",
+  "libgtk-3-0",
+  "libxshmfence1",
+  "libglu1",
+]
