@@ -1,19 +1,11 @@
-# Puppeteer: Nixpacks’ Node provider always adds apt `chromium` plus GUI libs.
-# Recent Railway Nixpacks Ubuntu images often fail with “Unable to locate package
-# chromium” (image/apt sources changed — not your app). We replace that apt set
-# with the same libraries only; Puppeteer then downloads its bundled Chrome at
-# `npm ci` (do not set PUPPETEER_SKIP_CHROMIUM_DOWNLOAD in Railway for this path).
+# Puppeteer: the Node provider adds many apt debs (often 10+ min on slow Ubuntu mirrors).
+# Use an empty apt list so Nixpacks does not emit `apt-get install` at all, and add
+# Chromium from nixpkgs instead (binary cache is usually much faster than apt).
+# See: https://github.com/railwayapp/nixpacks/blob/main/src/nixpacks/builder/docker/dockerfile_generation.rs
 [phases.setup]
-aptPkgs = [
-  "libnss3",
-  "libatk1.0-0",
-  "libatk-bridge2.0-0",
-  "libcups2",
-  "libgbm1",
-  "libasound2t64",
-  "libpangocairo-1.0-0",
-  "libxss1",
-  "libgtk-3-0",
-  "libxshmfence1",
-  "libglu1",
-]
+nixPkgs = ["...", "chromium"]
+aptPkgs = []
+
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/root/.nix-profile/bin/chromium"

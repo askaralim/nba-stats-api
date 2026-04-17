@@ -528,11 +528,10 @@ The API returns data in consistent, well-structured formats. See frontend data m
    - `PORT`: Railway automatically provides this (no need to set manually)
 
 4. **Railway build (Nixpacks + Puppeteer)**  
-   Nixpacks sees **`puppeteer`** in `package.json` (used by [`services/newsService.js`](./services/newsService.js) for some Nitter instances) and adds a **`apt-get install`** step for GUI libraries; **cold builds** can take **10–20+ minutes** when mirrors are slow.  
-   - **Slower than before**: **`Ign:`** in apt logs means **mirror retries** (Ubuntu infra, variable by region/time). We also **no longer install `chromium` via apt** (it broke on Railway’s image), so **`npm ci` pulls Puppeteer’s Chrome**—a large download that **did not happen** when system Chromium + skip was viable. **Cached rebuilds** are usually much shorter.  
-   - **Transient errors** (`Failed to fetch http://security.ubuntu.com/...`, many `Ign:` lines): Ubuntu mirror/network blips — **Redeploy**; often succeeds on retry.  
-   - **`Unable to locate package chromium`**: Railway’s **Nixpacks Ubuntu image** (or its apt indexes) can change so the **`chromium`** deb Nixpacks hardcodes is no longer available. **[`nixpacks.toml`](./nixpacks.toml)** replaces that apt list with the **same libs without `chromium`**; **`npm ci`** then uses **Puppeteer’s downloaded Chrome** (leave **`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD`** unset in Railway unless you supply a working **`PUPPETEER_EXECUTABLE_PATH`** yourself).  
-   - Optional: if you run a image that *does* ship system Chromium, set **`PUPPETEER_EXECUTABLE_PATH`** (and **`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true`**) in Railway Variables; [`newsService.js`](./services/newsService.js) reads `executablePath` from the environment.
+   Nixpacks sees **`puppeteer`** in `package.json` (used by [`services/newsService.js`](./services/newsService.js) for some Nitter instances). By default it adds a long **`apt-get install`** for GUI libraries and Chromium; on Railway that step often crawls (**`Ign:`** = mirror retries toward `archive.ubuntu.com`).  
+   - **[`nixpacks.toml`](./nixpacks.toml)** sets **`aptPkgs = []`** so the Dockerfile **omits apt entirely** for that layer, adds **`chromium` via `nixPkgs`**, and sets **`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD`** + **`PUPPETEER_EXECUTABLE_PATH=/root/.nix-profile/bin/chromium`** so Puppeteer uses the Nix-built browser (Nix binary cache is usually far faster than apt here).  
+   - **Transient apt errors** (if you ever re-enable apt): **Redeploy** on mirror blips.  
+   - Override **`PUPPETEER_EXECUTABLE_PATH`** in Railway Variables only if your image puts Chromium somewhere else.
 
 5. **Get Your API URL**:
    - Railway will provide a URL like: `https://your-app-name.up.railway.app`
