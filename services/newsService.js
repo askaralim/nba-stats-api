@@ -42,8 +42,10 @@ class NewsService {
    */
   async getBrowser() {
     if (!this.browser) {
+      const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH?.trim() || undefined;
       this.browser = await puppeteer.launch({
         headless: true,
+        ...(executablePath ? { executablePath } : {}),
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',

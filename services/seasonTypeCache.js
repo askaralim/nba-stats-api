@@ -105,7 +105,9 @@ module.exports = {
    */
   updateFromResponse(espnData) {
     const extracted = extractSeasonType(espnData);
-    if (!extracted || !Number.isFinite(extracted.type)) return;
+    if (!extracted || typeof extracted.type !== 'number' || !Number.isFinite(extracted.type)) {
+      return;
+    }
 
     cached = {
       ...extracted,
@@ -124,6 +126,10 @@ module.exports = {
    */
   get() {
     if (!cached) return null;
+    if (typeof cached.type !== 'number' || !Number.isFinite(cached.type)) {
+      cached = null;
+      return null;
+    }
     if (Date.now() - cached.updatedAt > CACHE_TTL_MS) {
       cached = null;
       return null;

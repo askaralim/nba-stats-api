@@ -1,0 +1,6 @@
+# Railway / Nixpacks: Puppeteer is detected and triggers a large apt Chromium stack.
+# Skip downloading a second bundled browser during npm install; use the system
+# Chromium from Nixpacks’ apt phase (see README “Railway build”).
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"

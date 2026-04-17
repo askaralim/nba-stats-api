@@ -527,7 +527,13 @@ The API returns data in consistent, well-structured formats. See frontend data m
    - `NODE_ENV`: `production` (optional, Railway sets this automatically)
    - `PORT`: Railway automatically provides this (no need to set manually)
 
-4. **Get Your API URL**:
+4. **Railway build (Nixpacks + Puppeteer)**  
+   Nixpacks sees **`puppeteer`** in `package.json` (used by [`services/newsService.js`](./services/newsService.js) for some Nitter instances) and runs a long **`apt-get install`** for Chromium and GUI libraries (`stage-0` in build logs). That is expected.  
+   - **Transient errors** (`Failed to fetch http://security.ubuntu.com/...`, many `Ign:` lines): Ubuntu mirror/network blips — **Redeploy** the service; often succeeds on retry.  
+   - **[`nixpacks.toml`](./nixpacks.toml)** sets `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD` and `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` so `npm install` does not also download Puppeteer’s bundled Chrome while the image already has system Chromium.  
+   - If Chromium lives elsewhere in a custom image, override **`PUPPETEER_EXECUTABLE_PATH`** in Railway Variables.
+
+5. **Get Your API URL**:
    - Railway will provide a URL like: `https://your-app-name.up.railway.app`
    - Use this URL in your frontend's `VITE_API_URL` environment variable
 
