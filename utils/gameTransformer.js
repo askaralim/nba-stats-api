@@ -40,6 +40,19 @@ class GameTransformer {
   }
 
   /**
+   * ESPN scoreboard competitors usually use `record: [{ type, summary }, ...]`.
+   * In some contexts (e.g. postseason) `record` may be a single object instead of an array.
+   * @param {unknown} recordOrRecords
+   * @returns {Array<Object>}
+   */
+  recordsAsArray(recordOrRecords) {
+    if (recordOrRecords == null) return [];
+    if (Array.isArray(recordOrRecords)) return recordOrRecords;
+    if (typeof recordOrRecords === 'object') return [recordOrRecords];
+    return [];
+  }
+
+  /**
    * Minimize game data for GamesToday page (only what's needed for GameCard)
    * @param {Object} game - Full game object
    * @returns {Object} Minimized game data
@@ -568,8 +581,20 @@ class GameTransformer {
   transformTeam(competitor) {
     if (!competitor?.team) return null;
 
-    const overallRecord = competitor.record?.find(r => r.type === 'total') || competitor.records?.find(r => r.type === 'total') ||{};
-    const { wins, losses } = this.parseRecord(overallRecord.summary);
+    const recordList = this.recordsAsArray(competitor.record);
+    const recordsList = this.recordsAsArray(competitor.records);
+    const overallRecord =
+      recordList.find(r => r.type === 'total')
+      || recordsList.find(r => r.type === 'total')
+      || recordList[0]
+      || recordsList[0]
+      || {};
+    const summary =
+      overallRecord.summary
+      ?? (overallRecord.wins != null || overallRecord.losses != null
+        ? `${overallRecord.wins ?? 0}-${overallRecord.losses ?? 0}`
+        : null);
+    const { wins, losses } = this.parseRecord(summary);
 
     // linescores may be [{ displayValue: "33" }, ...] (period/score derived from index) or legacy { period, value }
     const periods = (competitor.linescores || []).map((ls, index) => {
