@@ -103,6 +103,16 @@ function parseClockToSeconds(clock) {
 
 const PUSH_CHUNK = 80;
 
+/** Short label for push copy: Chinese city+name, else English city+name, else tricode */
+function teamDisplayLabel(team) {
+  if (!team) return '';
+  const zh = [team.cityZhCN, team.nameZhCN].filter(Boolean).join('');
+  if (zh) return zh;
+  const en = [team.city, team.name].filter(Boolean).join(' ').trim();
+  if (en) return en;
+  return team.abbreviation || '';
+}
+
 async function sendExpoPush(messages) {
   if (!messages.length) return;
   for (let i = 0; i < messages.length; i += PUSH_CHUNK) {
@@ -153,12 +163,18 @@ async function getTopGisPlayerForGame(gameId) {
         if (player.gis == null) continue;
         const gis = Number(player.gis);
         if (!best || gis > best.gis) {
+          const pts = Number(player.stats?.points) || 0;
+          const reb = Number(player.stats?.rebounds) || 0;
+          const ast = Number(player.stats?.assists) || 0;
           best = {
             gis,
             playerId: player.athleteId ? String(player.athleteId) : null,
             name: formatPlayerNameForDisplay(player.name || player.shortName || ''),
             teamAbbreviation: team.abbreviation || '',
             teamNameZhCN: getTeamNameZhCn(team.name),
+            points: pts,
+            rebounds: reb,
+            assists: ast,
           };
         }
       }
@@ -247,15 +263,39 @@ async function runScheduledChecks() {
         const minGis = Number(process.env.PUSH_MVP_MIN_GIS) || 30;
         if (top && top.gis >= minGis) {
           mvpNotified.add(key);
-          await broadcastToAll(
-            '本场最佳表现',
-            `${top.name}（${top.teamNameZhCN || top.teamAbbreviation}）Swish GIS ${top.gis.toFixed(1)}`,
-            {
-              type: 'mvp_performance',
-              gameId: String(gameId),
-              ...(top.playerId && { playerId: top.playerId }),
-            }
-          );
+          const awayTeam = game.awayTeam;
+          const homeTeam = game.homeTeam;
+          const awayLabel = teamDisplayLabel(awayTeam) || awayTeam?.abbreviation || '客场';
+          const homeLabel = teamDisplayLabel(homeTeam) || homeTeam?.abbreviation || '主场';
+          const as =
+            awayTeam?.score !== undefined && awayTeam?.score !== null && awayTeam?.score !== ''
+              ? Number(awayTeam.score)
+              : NaN;
+          const hs =
+            homeTeam?.score !== undefined && homeTeam?.score !== null && homeTeam?.score !== ''
+              ? Number(homeTeam.score)
+              : NaN;
+          const scoreLine =
+            Number.isFinite(as) && Number.isFinite(hs)
+              ? `${awayLabel} ${as} - ${homeLabel} ${hs}`
+              : `${awayTeam?.abbreviation || ''} @ ${homeTeam?.abbreviation || ''}`;
+          const statBits = [`${top.points}分`, `${top.rebounds}板`, `${top.assists}助`];
+          const statLine = statBits.join('');
+          const teamTag = top.teamNameZhCN || top.teamAbbreviation || '';
+          const body = `${scoreLine}。本场最佳：${top.name}（${teamTag}）${statLine}，Swish GIS ${top.gis.toFixed(1)}`;
+          await broadcastToAll('本场最佳表现', body, {
+            type: 'mvp_performance',
+            gameId: String(gameId),
+            ...(top.playerId && { playerId: top.playerId }),
+            awayScore: Number.isFinite(as) ? as : undefined,
+            homeScore: Number.isFinite(hs) ? hs : undefined,
+            awayAbbreviation: awayTeam?.abbreviation,
+            homeAbbreviation: homeTeam?.abbreviation,
+            mvpPoints: top.points,
+            mvpRebounds: top.rebounds,
+            mvpAssists: top.assists,
+            mvpGis: top.gis,
+          });
           console.log(`[Push] MVP GIS ${gameId} ${top.name}`);
         }
       }
