@@ -1165,6 +1165,7 @@ class GameTransformer {
     const stl = parseInt(player.stats.steals) || 0;
     const blk = parseInt(player.stats.blocks) || 0;
     const tov = parseInt(player.stats.turnovers) || 0;
+    const fouls = parseInt(player.stats.fouls) || 0;
 
     const fga = parseInt(player.stats.fieldGoals ? player.stats.fieldGoals.split('-')[1] : 0) || 0;
     const fgm = parseInt(player.stats.fieldGoals ? player.stats.fieldGoals.split('-')[0] : 0) || 0;
@@ -1172,33 +1173,65 @@ class GameTransformer {
     const fta = parseInt(player.stats.freeThrows ? player.stats.freeThrows.split('-')[1] : 0) || 0;
     const ftm = parseInt(player.stats.freeThrows ? player.stats.freeThrows.split('-')[0] : 0) || 0;
 
+    const dreb = parseInt(player.stats.defensiveRebounds) || 0;
     const orb = parseInt(player.stats.offensiveRebounds) || 0;
 
     const threePM = parseInt(player.stats.threePointers ? player.stats.threePointers.split('-')[0] : 0) || 0;
+    const threePA = parseInt(player.stats.threePointers ? player.stats.threePointers.split('-')[1] : 0) || 0;
 
     let score =
-      pts +
-      (0.7 * reb) +
-      (0.7 * ast) +
-      (1.7 * stl) +
-      (1.2 * blk) +
-      (0.5 * threePM) -
-      (0.7 * (fga - fgm)) -
-      (0.4 * (fta - ftm)) -
-      tov +
-      (0.3 * orb);
+      (1.0 * pts) +
+      (1.2 * reb) +
+      (1.2 * ast) +
+      (2.0 * stl) +
+      (1.6 * blk) +
+      (
+        (0.6 * fgm) - (0.5 * (fga - fgm)) +
+        (0.2 * ftm) - (0.4 * (fta - ftm)) +
+        (0.7 * threePM) - (0.6 * (threePA - threePM))
+      ) +
+      (ast * 0.3 - tov * 1.5) +
+      (stl * 0.5 + blk * 0.4 + dreb * 0.3) -
+      (tov * 0.5 + fouls * 0.5);
 
     if (teamWon) {
       score += 2;
     }
 
-    if (fgm > 5 && fgm / fga > 0.6) {
+    const fgPct = fga > 0 ? fgm / fga : 0;
+    if ((pts + ast > 40) && (fgPct > 0.5)) {
       score += 2;
     }
 
+    // if (fgm > 5 && fgm / fga > 0.6) {
+    //   score += 2;
+    // }
+
     if (pts > 10 && reb > 10 && ast > 10) {
-      score += 5;
+      score += 3;
     }
+
+    if (pts >= 35 && fgPct > 0.55) {
+      score += 3;
+    }
+    
+    if (ast >= 12) {
+      score += 2;
+    }
+    
+    if (reb >= 15) {
+      score += 2;
+    }
+    
+    if (stl >= 4 || blk >= 4) {
+      score += 2;
+    }
+
+    if (fgPct < 0.35 && fga > 10) {
+      score -= 5;
+    }
+
+    // score = Math.min(100, Math.max(0, score * 2));
 
     return Number(score.toFixed(1));
   }
