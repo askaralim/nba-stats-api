@@ -1137,24 +1137,11 @@ class GameTransformer {
    * Calculate Game Impact Score (GIS) for a player
    * GIS = PTS + 1.2 × REB + 1.5 × AST + 3 × STL + 3 × BLK - 1 × TOV
    * @param {Object} player - Player object with stats
+   * Calculate Game Impact Score (GIS)
+   * Inspired by Hollinger Game Score, with bonuses/penalties tuned for our UX.
+   * @param {Object} player - Player with `stats` object from ESPN boxscore
+   * @param {boolean} teamWon - Whether the player's team won the game
    * @returns {number} Game Impact Score
-   */
-  // calculateGIS(player) {
-  //   if (!player?.stats) return 0;
-    
-  //   const pts = parseInt(player.stats.points) || 0;
-  //   const reb = parseInt(player.stats.rebounds) || 0;
-  //   const ast = parseInt(player.stats.assists) || 0;
-  //   const stl = parseInt(player.stats.steals) || 0;
-  //   const blk = parseInt(player.stats.blocks) || 0;
-  //   const tov = parseInt(player.stats.turnovers) || 0;
-    
-  //   return pts + (1.2 * reb) + (1.5 * ast) + (3 * stl) + (3 * blk) - (1 * tov);
-  // }
-
-  /**
-   * Calculate Game Impact Score (GIS) v2
-   * Inspired by Hollinger Game Score but simplified for box score data
    */
   calculateGIS(player, teamWon) {
     if (!player?.stats) return 0;
@@ -1203,10 +1190,6 @@ class GameTransformer {
       score += 2;
     }
 
-    // if (fgm > 5 && fgm / fga > 0.6) {
-    //   score += 2;
-    // }
-
     if (pts > 10 && reb > 10 && ast > 10) {
       score += 3;
     }
@@ -1235,19 +1218,12 @@ class GameTransformer {
       score += 4;
     }
 
-    // score = Math.min(100, Math.max(0, score * 2));
-
     return Number(score.toFixed(1));
   }
 
   /**
-   * Calculate Game MVP (Who carried?) - player with highest GIS across both teams
-   * @param {Array} allPlayers - Array of all players from both teams
-   * @param {Array} teams - Array of team objects with team info
-   * @returns {Object|null} Game MVP object with player info and GIS
-   */
-  /**
-   * Calculate Game MVP (Who carried?) - only from winning team
+   * Calculate Game MVP ("Who carried?") — top GIS player on the winning team.
+   * Falls back to all players if winningTeamId is unknown or filters to empty.
    * @param {Array} allPlayers - All players from both teams
    * @param {Array} teams - Teams array with team info
    * @param {string|null} winningTeamId - ID of the winning team (null if tie or not determined)
@@ -1480,16 +1456,10 @@ class GameTransformer {
   }
 
   /**
-   * Transform season series data from ESPN summary API
-   * @param {Object} summaryData - Raw ESPN summary API response
-   * @param {Object} currentGame - Current game object with team info
-   * @returns {Object|null} Season series data
-   */
-  /**
-   * Transform season series data from ESPN summary API
-   * ESPN API structure: seasonseries is an array, each item has:
-   * - type, title, summary, seriesScore (string like "1-1"), totalCompetitions
-   * - events: array of games with competitors (homeAway, winner, team, score)
+   * Transform season series data from ESPN summary API.
+   * ESPN structure: `seasonseries` is an array; each item has
+   * `type`, `title`, `summary`, `seriesScore` (e.g. "1-1"), `totalCompetitions`,
+   * and `events` (games with competitors: `homeAway`, `winner`, `team`, `score`).
    * @param {Object} summaryData - Raw ESPN summary data
    * @param {Object} currentGame - Current game object with team IDs
    * @returns {Object|null} Transformed season series data

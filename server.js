@@ -13,27 +13,13 @@ const gameTransformer = require('./utils/gameTransformer');
 const pushNotificationService = require('./services/pushNotificationService');
 const seasonDefaults = require('./config/seasonDefaults');
 
-// Middleware
 const corsMiddleware = require('./middleware/cors');
-const { standardRateLimiter, strictRateLimiter } = require('./middleware/rateLimiter');
+const { standardRateLimiter } = require('./middleware/rateLimiter');
 const { performanceMiddleware, requestIdMiddleware } = require('./middleware/performance');
-const { paginationMiddleware } = require('./middleware/pagination');
 const {
-  validateGameId,
-  validateDate,
-  validateTeamAbbreviation,
-  validatePlayerId,
-  validatePagination,
-  validateGameFilters
-} = require('./middleware/validation');
-const {
-  asyncHandler,
   errorHandler,
   notFoundHandler,
-  sendSuccess,
-  NotFoundError,
-  ValidationError,
-  ExternalAPIError
+  sendSuccess
 } = require('./middleware/errorHandler');
 
 class WebServer {
