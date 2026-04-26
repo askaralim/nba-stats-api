@@ -2,6 +2,7 @@ const express = require('express');
 const compression = require('compression');
 const cron = require('node-cron');
 const pinoHttp = require('pino-http');
+const Sentry = require('@sentry/node');
 const logger = require('./utils/logger');
 const nbaService = require('./services/nbaService');
 const espnScraperService = require('./services/espnScraperService');
@@ -216,7 +217,12 @@ class WebServer {
     this.app.get('/favicon.ico', (req, res) => {
       res.status(204).end();
     });
-    
+
+    // Sentry error capture must run before our app's error handlers so it can
+    // observe the exception; it then calls next(err) so errorHandler still
+    // produces the response. No-op when Sentry isn't initialized.
+    Sentry.setupExpressErrorHandler(this.app);
+
     // 404 handler for undefined routes (must be after all routes)
     this.app.use(notFoundHandler);
 
