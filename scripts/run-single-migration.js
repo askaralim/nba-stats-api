@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const { withSslForRailway } = require('../config/pgConnectionOptions');
+const logger = require('../utils/logger');
 
 function getConnectionConfig() {
   const url = process.env.DATABASE_URL && process.env.DATABASE_URL.trim();
@@ -30,19 +31,19 @@ function getConnectionConfig() {
 async function run() {
   const rel = process.argv[2];
   if (!rel) {
-    console.error('Usage: node scripts/run-single-migration.js <path-to.sql>');
+    logger.error({ component: 'migrate-one' }, 'Usage: node scripts/run-single-migration.js <path-to.sql>');
     process.exit(1);
   }
 
   const filePath = path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
   if (!fs.existsSync(filePath)) {
-    console.error('File not found:', filePath);
+    logger.error({ component: 'migrate-one', filePath }, 'File not found');
     process.exit(1);
   }
 
   const config = getConnectionConfig();
   if (!config) {
-    console.error('No database config. Set DATABASE_URL or PG* vars.');
+    logger.error({ component: 'migrate-one' }, 'No database config. Set DATABASE_URL or PG* vars.');
     process.exit(1);
   }
 
@@ -53,16 +54,16 @@ async function run() {
       connectionTimeoutMillis: 60000,
     })
   );
-  console.log('Running', path.basename(filePath), '...');
+  logger.info({ component: 'migrate-one', file: path.basename(filePath) }, 'Running migration');
   try {
     await pool.query(sql);
-    console.log('Done.');
+    logger.info({ component: 'migrate-one' }, 'Done');
   } finally {
     await pool.end();
   }
 }
 
 run().catch((err) => {
-  console.error(err);
+  logger.error({ component: 'migrate-one', err }, 'Migration failed');
   process.exit(1);
 });

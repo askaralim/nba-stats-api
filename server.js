@@ -1,6 +1,8 @@
 const express = require('express');
 const compression = require('compression');
 const cron = require('node-cron');
+const pinoHttp = require('pino-http');
+const logger = require('./utils/logger');
 const nbaService = require('./services/nbaService');
 const espnScraperService = require('./services/espnScraperService');
 const standingsService = require('./services/standingsService');
@@ -21,6 +23,23 @@ const {
   notFoundHandler,
   sendSuccess
 } = require('./middleware/errorHandler');
+
+const httpLogger = pinoHttp({
+  logger,
+  genReqId: (req) => req.requestId,
+  customLogLevel: (req, res, err) => {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'info';
+  },
+  autoLogging: {
+    ignore: (req) => req.url === '/health' || req.url === '/favicon.ico',
+  },
+  serializers: {
+    req: (req) => ({ id: req.id, method: req.method, url: req.url }),
+    res: (res) => ({ statusCode: res.statusCode }),
+  },
+});
 
 class WebServer {
   constructor(port = 3000) {
@@ -63,6 +82,9 @@ class WebServer {
     this.app.use(performanceMiddleware);
     this.app.use(requestIdMiddleware);
 
+    // Structured request logging (uses requestIdMiddleware-supplied req.requestId)
+    this.app.use(httpLogger);
+
     // CORS middleware (supports web and mobile)
     this.app.use(corsMiddleware);
 
@@ -71,42 +93,22 @@ class WebServer {
   }
 
   setupCronJobs() {
-    // ============================================
-    // STARTUP PRE-FETCH (High Priority Data)
-    // ============================================
-    console.log('Initializing startup pre-fetch...');
+    logger.info({ component: 'startup' }, 'Initializing startup pre-fetch');
 
-    // 1. Today's Games - Most frequently accessed endpoint
-    console.log('  → Pre-fetching today\'s games...');
-    nbaService.getTodaysScoreboard().catch(err => {
-      console.error('  ✗ Failed to fetch today\'s games on startup:', err);
+    nbaService.getTodaysScoreboard().catch((err) => {
+      logger.error({ component: 'startup', task: 'todaysGames', err }, 'Startup pre-fetch failed');
     });
 
-    // 2. Current Season Standings - Commonly accessed
-    console.log('  → Pre-fetching current season standings...');
-    standingsService.getStandings({ season: seasonDefaults.STANDINGS_YEAR, seasonType: seasonDefaults.STANDINGS_TYPE }).catch(err => {
-      console.error('  ✗ Failed to fetch standings on startup:', err);
+    standingsService.getStandings({ season: seasonDefaults.STANDINGS_YEAR, seasonType: seasonDefaults.STANDINGS_TYPE }).catch((err) => {
+      logger.error({ component: 'startup', task: 'standings', err }, 'Startup pre-fetch failed');
     });
 
-    // 3. All Team Info - Static data, used across multiple pages
-    console.log('  → Pre-fetching all team info (30 teams)...');
-    teamService.prefetchAllTeamInfo().catch(err => {
-      console.error('  ✗ Failed to pre-fetch team info on startup:', err);
+    teamService.prefetchAllTeamInfo().catch((err) => {
+      logger.error({ component: 'startup', task: 'teamInfo', err }, 'Startup pre-fetch failed');
     });
 
-    // 4. News - Expensive operation, frequently accessed
-    // console.log('  → Pre-fetching news...');
-    // newsService.getShamsTweets().catch(err => {
-    //   console.error('  ✗ Failed to fetch news on startup:', err);
-    // });
-    
+    logger.info({ component: 'startup' }, 'Startup pre-fetch initiated (non-blocking)');
 
-    console.log('Startup pre-fetch initiated (non-blocking)');
-
-    // ============================================
-    // SCHEDULED CRON JOBS
-    // ============================================
-    
     const register = (task) => {
       this.cronTasks.push(task);
       return task;
@@ -114,58 +116,58 @@ class WebServer {
 
     register(cron.schedule('*/5 * * * *', async () => {
       if (this.shuttingDown) return;
-      console.log('[Cron] News ingestion (scheduled every 5 minutes)...');
+      logger.info({ component: 'cron', task: 'newsIngestion' }, 'News ingestion: starting (every 5m)');
       try {
         const result = await newsIngestionService.runIngestion();
-        console.log(`[Cron] ✓ News ingestion: ${result.inserted} inserted, ${result.skipped} skipped`);
-      } catch (error) {
-        console.error('[Cron] ✗ News ingestion failed:', error);
+        logger.info({ component: 'cron', task: 'newsIngestion', inserted: result.inserted, skipped: result.skipped }, 'News ingestion: completed');
+      } catch (err) {
+        logger.error({ component: 'cron', task: 'newsIngestion', err }, 'News ingestion: failed');
       }
     }));
 
     register(cron.schedule('*/3 * * * *', async () => {
       if (this.shuttingDown) return;
-      console.log('[Cron] News translation (scheduled every 3 minutes)...');
+      logger.info({ component: 'cron', task: 'newsTranslation' }, 'News translation: starting (every 3m)');
       try {
         const result = await newsTranslationService.runTranslation();
         if (result.processed > 0) {
-          console.log(`[Cron] ✓ News translation: ${result.succeeded} succeeded, ${result.failed} failed`);
+          logger.info({ component: 'cron', task: 'newsTranslation', succeeded: result.succeeded, failed: result.failed }, 'News translation: completed');
         }
-      } catch (error) {
-        console.error('[Cron] ✗ News translation failed:', error);
+      } catch (err) {
+        logger.error({ component: 'cron', task: 'newsTranslation', err }, 'News translation: failed');
       }
     }));
 
     register(cron.schedule('*/2 * * * *', async () => {
       if (this.shuttingDown) return;
-      console.log('[Cron] Refreshing today\'s games (scheduled every 2 minutes)...');
+      logger.info({ component: 'cron', task: 'todaysGames' }, "Today's games refresh: starting (every 2m)");
       try {
         await nbaService.getTodaysScoreboard();
-        console.log('[Cron] ✓ Today\'s games refreshed successfully');
-      } catch (error) {
-        console.error('[Cron] ✗ Failed to refresh today\'s games:', error);
+        logger.info({ component: 'cron', task: 'todaysGames' }, "Today's games refresh: completed");
+      } catch (err) {
+        logger.error({ component: 'cron', task: 'todaysGames', err }, "Today's games refresh: failed");
       }
     }));
 
     register(cron.schedule('*/30 * * * *', async () => {
       if (this.shuttingDown) return;
-      console.log('[Cron] Refreshing standings (scheduled every 30 minutes)...');
+      logger.info({ component: 'cron', task: 'standings' }, 'Standings refresh: starting (every 30m)');
       try {
         await standingsService.getStandings({ season: seasonDefaults.STANDINGS_YEAR, seasonType: seasonDefaults.STANDINGS_TYPE });
-        console.log('[Cron] ✓ Standings refreshed successfully');
-      } catch (error) {
-        console.error('[Cron] ✗ Failed to refresh standings:', error);
+        logger.info({ component: 'cron', task: 'standings' }, 'Standings refresh: completed');
+      } catch (err) {
+        logger.error({ component: 'cron', task: 'standings', err }, 'Standings refresh: failed');
       }
     }));
 
     register(cron.schedule('*/30 * * * *', async () => {
       if (this.shuttingDown) return;
-      console.log('[Cron] Refreshing all team info (scheduled every 30 minutes)...');
+      logger.info({ component: 'cron', task: 'teamInfo' }, 'Team info refresh: starting (every 30m)');
       try {
         const results = await teamService.prefetchAllTeamInfo(true);
-        console.log(`[Cron] ✓ Team info refreshed: ${results.success} succeeded, ${results.failed} failed`);
-      } catch (error) {
-        console.error('[Cron] ✗ Failed to refresh team info:', error);
+        logger.info({ component: 'cron', task: 'teamInfo', succeeded: results.success, failed: results.failed }, 'Team info refresh: completed');
+      } catch (err) {
+        logger.error({ component: 'cron', task: 'teamInfo', err }, 'Team info refresh: failed');
       }
     }));
 
@@ -175,18 +177,12 @@ class WebServer {
       if (this.shuttingDown) return;
       try {
         await pushNotificationService.runScheduledChecks();
-      } catch (error) {
-        console.error('[Cron] ✗ Push notification check failed:', error);
+      } catch (err) {
+        logger.error({ component: 'cron', task: 'pushNotifications', err }, 'Push notification check failed');
       }
     }));
 
-    console.log('Cron jobs initialized:');
-    console.log('  - News ingestion: every 5 minutes');
-    console.log('  - News translation: every 3 minutes');
-    console.log('  - Today\'s Games: every 2 minutes');
-    console.log('  - Standings: every 30 minutes');
-    console.log('  - Team Info: every 30 minutes');
-    console.log('  - Push alerts (close game / MVP GIS): every minute (set DISABLE_PUSH_CRON=true to disable)');
+    logger.info({ component: 'cron' }, 'Cron jobs initialized: news ingest 5m, translation 3m, games 2m, standings 30m, team info 30m, push 1m');
   }
 
   setupRoutes() {
@@ -230,7 +226,7 @@ class WebServer {
 
   start() {
     this.httpServer = this.app.listen(this.port, '0.0.0.0', () => {
-      console.log(`Server is running on http://0.0.0.0:${this.port}`);
+      logger.info({ component: 'server', port: this.port }, 'Server listening');
     });
     return this.httpServer;
   }
@@ -248,14 +244,14 @@ class WebServer {
       try {
         if (task && typeof task.stop === 'function') task.stop();
       } catch (err) {
-        console.error('[Shutdown] Failed to stop cron task:', err?.message || err);
+        logger.error({ component: 'shutdown', err }, 'Failed to stop cron task');
       }
     }
 
     const closeHttp = new Promise((resolve) => {
       if (!this.httpServer) return resolve();
       this.httpServer.close((err) => {
-        if (err) console.error('[Shutdown] HTTP server close error:', err.message);
+        if (err) logger.error({ component: 'shutdown', err }, 'HTTP server close error');
         resolve();
       });
     });
@@ -269,7 +265,7 @@ class WebServer {
         await db.closePool();
       }
     } catch (err) {
-      console.error('[Shutdown] DB close error:', err?.message || err);
+      logger.error({ component: 'shutdown', err }, 'DB close error');
     }
   }
 

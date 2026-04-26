@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const { withSslForRailway } = require('../config/pgConnectionOptions');
+const logger = require('../utils/logger');
 
 function getConnectionConfig() {
   const url = process.env.DATABASE_URL && process.env.DATABASE_URL.trim();
@@ -30,7 +31,7 @@ function getConnectionConfig() {
 async function run() {
   const config = getConnectionConfig();
   if (!config) {
-    console.error('No database config. Set DATABASE_URL or PG* vars.');
+    logger.error({ component: 'migrate' }, 'No database config. Set DATABASE_URL or PG* vars.');
     process.exit(1);
   }
 
@@ -41,22 +42,22 @@ async function run() {
   for (const file of files) {
     const filePath = path.join(migrationsDir, file);
     const sql = fs.readFileSync(filePath, 'utf8');
-    console.log(`Running ${file}...`);
+    logger.info({ component: 'migrate', file }, 'Running migration');
     try {
       await pool.query(sql);
-      console.log(`  ✓ ${file} completed`);
+      logger.info({ component: 'migrate', file }, 'Migration completed');
     } catch (err) {
-      console.error(`  ✗ ${file} failed:`, err.message);
+      logger.error({ component: 'migrate', file, errorMessage: err.message }, 'Migration failed');
       await pool.end();
       process.exit(1);
     }
   }
 
   await pool.end();
-  console.log('Migrations complete.');
+  logger.info({ component: 'migrate' }, 'All migrations complete');
 }
 
 run().catch((err) => {
-  console.error(err);
+  logger.error({ component: 'migrate', err }, 'Migration runner crashed');
   process.exit(1);
 });

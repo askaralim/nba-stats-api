@@ -3,6 +3,8 @@
  * Implements exponential backoff retry logic for API calls
  */
 
+const logger = require('./logger');
+
 /**
  * Retry a function with exponential backoff
  * @param {Function} fn - Async function to retry
@@ -61,11 +63,10 @@ async function retryWithBackoff(fn, options = {}) {
         throw error;
       }
 
-      // Log retry attempt
-      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} failed:`, {
-        error: error.message,
-        retryingIn: `${delay}ms`
-      });
+      logger.warn(
+        { component: 'retry', attempt: attempt + 1, maxRetries, retryingInMs: delay, errorMessage: error.message },
+        'Retry attempt failed; backing off',
+      );
 
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));

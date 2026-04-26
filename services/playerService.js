@@ -6,6 +6,7 @@
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const { fetchWithRetry } = require('../utils/retry');
+const logger = require('../utils/logger');
 
 const ESPN_FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -175,7 +176,7 @@ class PlayerService {
 
       return translatedData;
     } catch (error) {
-      console.error(`Error fetching player bio for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'bio', playerId, err: error }, 'Error fetching player bio');
       throw error;
     }
   }
@@ -212,7 +213,7 @@ class PlayerService {
 
       return translatedData;
     } catch (error) {
-      console.error(`Error fetching player stats for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'stats', playerId, err: error }, 'Error fetching player stats');
       throw error;
     }
   }
@@ -250,7 +251,7 @@ class PlayerService {
 
       return translatedData;
     } catch (error) {
-      console.error(`Error fetching player info for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'info', playerId, err: error }, 'Error fetching player info');
       throw error;
     }
   }
@@ -288,7 +289,7 @@ class PlayerService {
 
       return translatedData;
     } catch (error) {
-      console.error(`Error fetching player advanced stats for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'advancedStats', playerId, err: error }, 'Error fetching player advanced stats');
       throw error;
     }
   }
@@ -327,7 +328,7 @@ class PlayerService {
 
       return translatedData;
     } catch (error) {
-      console.error(`Error fetching player game log for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'gameLog', playerId, err: error }, 'Error fetching player game log');
       throw error;
     }
   }
@@ -387,7 +388,7 @@ class PlayerService {
 
       return details;
     } catch (error) {
-      console.error(`Error getting player details for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'details', playerId, err: error }, 'Error getting player details');
       throw error;
     }
   }
@@ -425,7 +426,7 @@ class PlayerService {
         stats: stats
       };
     } catch (error) {
-      console.error(`Error getting current season stats for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'currentSeasonStats', playerId, err: error }, 'Error getting current season stats');
       return null;
     }
   }
@@ -470,7 +471,7 @@ class PlayerService {
         totals: totals
       };
     } catch (error) {
-      console.error(`Error getting regular season stats for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'regularSeasonStats', playerId, err: error }, 'Error getting regular season stats');
       return null;
     }
   }
@@ -505,7 +506,7 @@ class PlayerService {
         glossary: advancedStatsData.glossary || []
       };
     } catch (error) {
-      console.error(`Error getting advanced stats for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'advancedStatsClean', playerId, err: error }, 'Error getting advanced stats');
       return null;
     }
   }
@@ -584,7 +585,7 @@ class PlayerService {
         events: reorderedEvents
       };
     } catch (error) {
-      console.error(`Error getting last 5 games for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'last5Games', playerId, err: error }, 'Error getting last 5 games');
       return null;
     }
   }
@@ -604,7 +605,7 @@ class PlayerService {
 
       return cleanBio;
     } catch (error) {
-      console.error(`Error getting bio data for ${playerId}:`, error);
+      logger.error({ component: 'playerService', task: 'bioClean', playerId, err: error }, 'Error getting bio data');
       return null;
     }
   }

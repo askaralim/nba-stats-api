@@ -13,6 +13,7 @@
  */
 
 const { SEASON_TYPE_NAMES } = require('../config/seasonTypeNames');
+const logger = require('../utils/logger');
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -114,8 +115,9 @@ module.exports = {
       updatedAt: Date.now(),
     };
 
-    console.log(
-      `[seasonTypeCache] Updated: type=${cached.type} (${cached.name || '?'}), year=${cached.year}`
+    logger.info(
+      { component: 'seasonTypeCache', type: cached.type, name: cached.name, year: cached.year },
+      'Season type cache updated',
     );
   },
 

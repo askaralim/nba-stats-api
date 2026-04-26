@@ -8,6 +8,7 @@
  */
 
 const { Pool } = require('pg');
+const logger = require('../utils/logger');
 const { withSslForRailway } = require('./pgConnectionOptions');
 
 function getConnectionConfig() {
@@ -50,13 +51,13 @@ if (isConfigured) {
   );
 
   pool.on('error', (err) => {
-    console.error('[DB] Unexpected pool error:', err.message);
+    logger.error({ component: 'db', err }, 'Unexpected pool error');
   });
 
   // Prevent process crash when the server closes an idle connection (client emits 'error').
   pool.on('connect', (client) => {
     client.on('error', (err) => {
-      console.error('[DB] Client connection error (will be replaced in pool):', err.message);
+      logger.error({ component: 'db', err }, 'Client connection error (will be replaced in pool)');
     });
   });
 }
@@ -117,7 +118,7 @@ async function closePool() {
   try {
     await pool.end();
   } catch (err) {
-    console.error('[DB] Failed to close pool cleanly:', err?.message || err);
+    logger.error({ component: 'db', err }, 'Failed to close pool cleanly');
   }
 }
 

@@ -8,6 +8,7 @@ const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const seasonDefaults = require('../config/seasonDefaults');
 const seasonTypeCache = require('./seasonTypeCache');
 const leagueSeasonService = require('./leagueSeasonService');
+const logger = require('../utils/logger');
 
 /** Cached result of “can we load playoff leaders?” probe (avoid hitting ESPN every request). */
 const POSTSEASON_PROBE_TTL_MS = 30 * 60 * 1000;
@@ -397,7 +398,7 @@ class ESPNScraperService {
 
       return transformedData;
     } catch (error) {
-      console.error('Error fetching ESPN player stats (leaders):', error);
+      logger.error({ component: 'espnScraper', task: 'leaders', err: error }, 'Error fetching ESPN player stats (leaders)');
       const isLeadersFetchError =
         error &&
         typeof error.message === 'string' &&
@@ -511,7 +512,7 @@ class ESPNScraperService {
 
       return result;
     } catch (error) {
-      console.error('Error fetching ESPN leaders:', error);
+      logger.error({ component: 'espnScraper', task: 'leaders', err: error }, 'Error fetching ESPN leaders');
       throw error;
     }
   }

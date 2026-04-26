@@ -3,6 +3,8 @@
  * Provides consistent error responses for API endpoints
  */
 
+const logger = require('../utils/logger');
+
 /**
  * Custom error classes for better error handling
  */
@@ -120,22 +122,20 @@ const sendError = (res, error) => {
  * Should be used as the last middleware in Express app
  */
 const errorHandler = (err, req, res, next) => {
-  // Skip logging for favicon requests (browsers auto-request this)
   if (req.path === '/favicon.ico') {
     return res.status(204).end();
   }
-  
-  // Log error for debugging
-  console.error('[Error Handler]', {
-    path: req.path,
-    method: req.method,
-    error: {
-      message: err.message,
-      code: err.code,
-      statusCode: err.statusCode,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    }
-  });
+
+  const log = req.log || logger;
+  log.error(
+    {
+      component: 'errorHandler',
+      path: req.path,
+      method: req.method,
+      err,
+    },
+    'Request failed',
+  );
 
   sendError(res, err);
 };

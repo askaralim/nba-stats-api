@@ -8,6 +8,7 @@ const { fetchWithRetry } = require('../utils/retry');
 const { getTeamNameZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const seasonTypeCache = require('./seasonTypeCache');
+const logger = require('../utils/logger');
 
 class NBAService {
   constructor() {
@@ -109,11 +110,11 @@ class NBAService {
     } catch (error) {
       // If all retries failed and we have cached data, return it
       if (cached && (error.name === 'AbortError' || error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.cause?.code === 'UND_ERR_CONNECT_TIMEOUT')) {
-        console.warn(`Scoreboard fetch failed for ${espnDate} after retries, returning cached data`);
+        logger.warn({ component: 'nbaService', task: 'scoreboard', espnDate }, 'Scoreboard fetch failed after retries; returning cached data');
         return cached.data;
       }
-      
-      console.error('Error fetching scoreboard:', error);
+
+      logger.error({ component: 'nbaService', task: 'scoreboard', err: error }, 'Error fetching scoreboard');
       throw error;
     }
   }
@@ -168,11 +169,14 @@ class NBAService {
                              error.message?.includes('timeout');
       
       if (isTimeoutError && cached) {
-        console.warn(`Game details fetch failed for ${gameId} after retries, returning cached data (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+        logger.warn(
+          { component: 'nbaService', task: 'gameDetails', gameId, cacheAgeSec: Math.round((Date.now() - cached.timestamp) / 1000) },
+          'Game details fetch failed after retries; returning cached data',
+        );
         return cached.data;
       }
-      
-      console.error('Error fetching game details:', error);
+
+      logger.error({ component: 'nbaService', task: 'gameDetails', gameId, err: error }, 'Error fetching game details');
       throw error;
     }
   }
@@ -224,11 +228,11 @@ class NBAService {
     } catch (error) {
       // If all retries failed and we have cached data, return it
       if (cached && (error.name === 'AbortError' || error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.cause?.code === 'UND_ERR_CONNECT_TIMEOUT')) {
-        console.warn(`Game summary fetch failed for ${gameId} after retries, returning cached data`);
+        logger.warn({ component: 'nbaService', task: 'gameSummary', gameId }, 'Game summary fetch failed after retries; returning cached data');
         return cached.data;
       }
-      
-      console.error('Error fetching game summary:', error);
+
+      logger.error({ component: 'nbaService', task: 'gameSummary', gameId, err: error }, 'Error fetching game summary');
       throw error;
     }
   }
@@ -312,7 +316,7 @@ class NBAService {
           if (!summaryData?.boxscore) continue;
           boxscore = gameTransformer.transformBoxscore(summaryData.boxscore);
         } catch (err) {
-          console.warn(`Failed to get game details for ${gameId}:`, err.message);
+          logger.warn({ component: 'nbaService', task: 'topPerformers', gameId, errorMessage: err.message }, 'Failed to get game details');
           continue;
         }
 
@@ -362,7 +366,7 @@ class NBAService {
       this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } catch (error) {
-      console.error('Error fetching today top performers by GIS:', error);
+      logger.error({ component: 'nbaService', task: 'topPerformersByGIS', err: error }, 'Error fetching today top performers by GIS');
       return {
         mode: 'gis',
         performers: [],
@@ -471,7 +475,7 @@ class NBAService {
       this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } catch (error) {
-      console.error('Error fetching today top performers:', error);
+      logger.error({ component: 'nbaService', task: 'topPerformers', err: error }, 'Error fetching today top performers');
       return { points: [], rebounds: [], assists: [] };
     }
   }

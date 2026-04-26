@@ -18,6 +18,7 @@ const nbaService = require('./nbaService');
 const gameTransformer = require('../utils/gameTransformer');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const { getTeamNameZhCn } = require('../utils/teamTranslations');
+const logger = require('../utils/logger');
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const MAX_MEMORY_TOKENS = 10000;
@@ -49,7 +50,7 @@ async function registerToken(token, platform) {
       );
       return;
     } catch (e) {
-      console.error('[Push] DB register failed (run migrations/003 if missing):', e.message);
+      logger.error({ component: 'push', errorMessage: e.message }, 'DB register failed (run migrations/003 if missing)');
     }
   }
 
@@ -66,7 +67,7 @@ async function getRecipientTokens() {
       const { rows } = await db.query('SELECT token FROM push_tokens');
       return rows.map((r) => r.token).filter(Boolean);
     } catch (e) {
-      console.error('[Push] Failed to load tokens from DB:', e.message);
+      logger.error({ component: 'push', errorMessage: e.message }, 'Failed to load tokens from DB');
       return Array.from(memoryTokens);
     }
   }
@@ -129,7 +130,7 @@ async function sendExpoPush(messages) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.warn('[Push] Expo send failed:', res.status, text.slice(0, 200));
+      logger.warn({ component: 'push', statusCode: res.status, body: text.slice(0, 200) }, 'Expo send failed');
     }
   }
 }
@@ -181,7 +182,7 @@ async function getTopGisPlayerForGame(gameId) {
     }
     return best;
   } catch (e) {
-    console.warn(`[Push] getTopGisForGame ${gameId}:`, e.message);
+    logger.warn({ component: 'push', task: 'getTopGisForGame', gameId, errorMessage: e.message }, 'getTopGisForGame failed');
     return null;
   }
 }
@@ -198,7 +199,7 @@ async function runScheduledChecks() {
   try {
     scoreboardData = await nbaService.getScoreboard(dateKey);
   } catch (e) {
-    console.warn('[Push] scoreboard failed:', e.message);
+    logger.warn({ component: 'push', task: 'scoreboard', errorMessage: e.message }, 'Scoreboard fetch failed');
     return;
   }
 
@@ -251,7 +252,7 @@ async function runScheduledChecks() {
             homeScore: h,
             margin,
           });
-          console.log(`[Push] close-game alert ${gameId} ${away} ${a} @ ${home} ${h} margin=${margin}`);
+          logger.info({ component: 'push', alert: 'closeGame', gameId, away, awayScore: a, home, homeScore: h, margin }, 'Close-game alert sent');
         }
       }
     }
@@ -296,7 +297,7 @@ async function runScheduledChecks() {
             mvpAssists: top.assists,
             mvpGis: top.gis,
           });
-          console.log(`[Push] MVP GIS ${gameId} ${top.name}`);
+          logger.info({ component: 'push', alert: 'mvpGis', gameId, playerName: top.name, gis: top.gis }, 'MVP GIS alert sent');
         }
       }
     }

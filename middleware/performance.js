@@ -3,35 +3,37 @@
  * Tracks response times and logs slow requests
  */
 
+const logger = require('../utils/logger');
+
 /**
  * Response time tracking middleware
  * Adds X-Response-Time header and logs slow requests
  */
 const performanceMiddleware = (req, res, next) => {
   const startTime = Date.now();
-  
-  // Override res.end to capture response time
+
   const originalEnd = res.end;
-  res.end = function(...args) {
+  res.end = function (...args) {
     const responseTime = Date.now() - startTime;
-    
-    // Add response time header
     res.setHeader('X-Response-Time', `${responseTime}ms`);
-    
-    // Log slow requests (> 500ms)
+
     if (responseTime > 500) {
-      console.warn(`[Performance] Slow request detected:`, {
-        method: req.method,
-        path: req.path,
-        responseTime: `${responseTime}ms`,
-        statusCode: res.statusCode
-      });
+      const log = req.log || logger;
+      log.warn(
+        {
+          component: 'performance',
+          method: req.method,
+          path: req.path,
+          responseTimeMs: responseTime,
+          statusCode: res.statusCode,
+        },
+        'Slow request',
+      );
     }
-    
-    // Call original end
+
     originalEnd.apply(this, args);
   };
-  
+
   next();
 };
 

@@ -6,6 +6,7 @@
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const seasonDefaults = require('../config/seasonDefaults');
 const { fetchWithRetry } = require('../utils/retry');
+const logger = require('../utils/logger');
 
 class StandingsService {
   constructor() {
@@ -190,7 +191,7 @@ class StandingsService {
 
       return transformedData;
     } catch (error) {
-      console.error('Error fetching standings:', error);
+      logger.error({ component: 'standingsService', err: error }, 'Error fetching standings');
       throw error;
     }
   }

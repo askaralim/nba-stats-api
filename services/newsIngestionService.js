@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const db = require('../config/db');
 const newsService = require('./newsService');
+const logger = require('../utils/logger');
 
 const SOURCE_TYPE = 'twitter';
 
@@ -78,7 +79,7 @@ function normalizeTweet(tweet) {
  */
 async function insertNews(rows) {
   if (!db.isConfigured) {
-    console.warn('[NewsIngestion] Database not configured, skipping insert');
+    logger.warn({ component: 'newsIngestion' }, 'Database not configured, skipping insert');
     return { inserted: 0, skipped: rows.length };
   }
 
@@ -118,7 +119,7 @@ async function insertNews(rows) {
           inserted++;
         }
       } catch (err) {
-        console.error(`[NewsIngestion] Failed to insert ${row.source_id}:`, err.message);
+        logger.error({ component: 'newsIngestion', sourceId: row.source_id, errorMessage: err.message }, 'Failed to insert news row');
       }
     }
     return { inserted, skipped: rows.length - inserted };
@@ -137,21 +138,21 @@ async function runIngestion(options = {}) {
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`[NewsIngestion] Fetching tweets (attempt ${attempt}/${maxRetries})...`);
+      logger.info({ component: 'newsIngestion', attempt, maxRetries }, 'Fetching tweets');
       const tweets = await newsService.getShamsTweets();
 
       if (!tweets || tweets.length === 0) {
-        console.warn('[NewsIngestion] No tweets fetched');
+        logger.warn({ component: 'newsIngestion' }, 'No tweets fetched');
         return { success: true, inserted: 0, skipped: 0 };
       }
 
       const rows = tweets.map(normalizeTweet);
       const { inserted, skipped } = await insertNews(rows);
 
-      console.log(`[NewsIngestion] Done: ${inserted} inserted, ${skipped} skipped (duplicates)`);
+      logger.info({ component: 'newsIngestion', inserted, skipped }, 'Ingestion run complete');
       return { success: true, inserted, skipped };
     } catch (error) {
-      console.error(`[NewsIngestion] Attempt ${attempt} failed:`, error.message);
+      logger.error({ component: 'newsIngestion', attempt, errorMessage: error.message }, 'Ingestion attempt failed');
       if (attempt === maxRetries) {
         return { success: false, inserted: 0, skipped: 0, error: error.message };
       }

@@ -12,6 +12,7 @@ const teamService = require('../services/teamService');
 const newsService = require('../services/newsService');
 const playerService = require('../services/playerService');
 const gameTransformer = require('../utils/gameTransformer');
+const logger = require('../utils/logger');
 const { paginateArray, createPaginationMeta, paginationMiddleware } = require('../middleware/pagination');
 const { standardRateLimiter, strictRateLimiter } = require('../middleware/rateLimiter');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
@@ -213,7 +214,7 @@ async function getGameSummaryPayload(gameId) {
         generatedAt: new Date().toISOString()
       };
     } catch (aiError) {
-      console.error('AI summary generation failed:', aiError.message);
+      logger.error({ component: 'route', task: 'aiSummary', errorMessage: aiError.message }, 'AI summary generation failed');
       if (boxscore.gameStory) {
         const fallbackSummary = boxscore.gameStory.summary;
         gameSummaryCache.set(gameId, fallbackSummary, 'fallback');
@@ -544,7 +545,7 @@ router.get('/nba/todayTopPerformers',
     try {
       result = await nbaService.getTodayTopPerformersByGIS(date);
     } catch (error) {
-      console.error('Error fetching today top performers:', error.message);
+      logger.error({ component: 'route', task: 'topPerformers', errorMessage: error.message }, 'Error fetching today top performers');
       result = { mode: 'gis', performers: [], hasFinishedGames: false };
     }
 
@@ -566,7 +567,7 @@ router.get('/nba/todayTopPerformers',
             });
             responseCache.set(insightCacheKey, insight, SWISH_INSIGHT_CACHE_TTL_MS);
           } catch (aiErr) {
-            console.warn(`Swish Insight failed for ${performer.name}:`, aiErr.message);
+            logger.warn({ component: 'route', task: 'swishInsight', playerName: performer.name, errorMessage: aiErr.message }, 'Swish Insight failed');
           }
         }
 

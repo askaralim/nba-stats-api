@@ -5,6 +5,7 @@
  */
 
 const axios = require('axios');
+const logger = require('../utils/logger');
 
 class OpenAIService {
   constructor() {
@@ -64,7 +65,7 @@ class OpenAIService {
       const analysis = JSON.parse(content);
       return analysis;
     } catch (error) {
-      console.error('OpenAI analysis error:', error.response?.data || error.message);
+      logger.error({ component: 'openai', task: 'analysis', responseData: error.response?.data, errorMessage: error.message }, 'OpenAI analysis error');
       throw error;
     }
   }
@@ -115,7 +116,7 @@ class OpenAIService {
 
       return summary;
     } catch (error) {
-      console.error('OpenAI summary error:', error.response?.data || error.message);
+      logger.error({ component: 'openai', task: 'summary', responseData: error.response?.data, errorMessage: error.message }, 'OpenAI summary error');
       throw error;
     }
   }
@@ -135,7 +136,7 @@ class OpenAIService {
       
       return summary;
     } catch (error) {
-      console.error('Two-step AI summary generation failed:', error.message);
+      logger.error({ component: 'openai', task: 'twoStepSummary', errorMessage: error.message }, 'Two-step AI summary generation failed');
       throw error;
     }
   }
@@ -369,7 +370,7 @@ ${overtimeSection}
         translated_content: result.translated_content || result.translatedContent || content
       };
     } catch (error) {
-      console.error('OpenAI translation error:', error.response?.data || error.message);
+      logger.error({ component: 'openai', task: 'translation', responseData: error.response?.data, errorMessage: error.message }, 'OpenAI translation error');
       throw error;
     }
   }
@@ -467,7 +468,7 @@ ${overtimeSection}
       }
       return insight;
     } catch (error) {
-      console.error('OpenAI Swish Insight error:', error.response?.data || error.message);
+      logger.error({ component: 'openai', task: 'swishInsight', responseData: error.response?.data, errorMessage: error.message }, 'OpenAI Swish Insight error');
       throw error;
     }
   }

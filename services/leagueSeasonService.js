@@ -6,6 +6,7 @@
 
 const db = require('../config/db');
 const { SEASON_TYPE_NAMES } = require('../config/seasonTypeNames');
+const logger = require('../utils/logger');
 
 /** Short TTL so manual `league_seasons` / `is_current` updates show in seasonMeta without long lag. */
 const CACHE_TTL_MS = 15 * 1000;
@@ -34,7 +35,7 @@ async function fetchCurrentRowFromDb() {
     );
     return { ok: true, row: rows[0] || null };
   } catch (err) {
-    console.warn('[leagueSeasonService] league_seasons query failed:', err?.message || err);
+    logger.warn({ component: 'leagueSeasonService', err }, 'league_seasons query failed');
     return { ok: false, row: null, error: err };
   }
 }

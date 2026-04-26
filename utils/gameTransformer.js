@@ -8,6 +8,7 @@ const { getTeamNameZhCn, getTeamCityZhCn } = require('./teamTranslations');
 const { formatPlayerNameForDisplay } = require('./playerName');
 const gameMeta = require('./transform/gameMeta');
 const playerScoring = require('./transform/playerScoring');
+const logger = require('./logger');
 
 class GameTransformer {
   mapStatus(espnStatus) {
@@ -779,9 +780,7 @@ class GameTransformer {
 
   transformBoxscore(boxscoreData) {
     if (!boxscoreData?.teams) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[transformBoxscore] Missing boxscoreData.teams');
-      }
+      logger.debug({ component: 'gameTransformer', task: 'transformBoxscore' }, 'Missing boxscoreData.teams');
       return null;
     }
 
@@ -802,13 +801,16 @@ class GameTransformer {
     
     // Check if players data exists
     if (!boxscoreData.players || !Array.isArray(boxscoreData.players)) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[transformBoxscore] Missing or invalid boxscoreData.players:', {
+      logger.debug(
+        {
+          component: 'gameTransformer',
+          task: 'transformBoxscore',
           hasPlayers: !!boxscoreData.players,
           isArray: Array.isArray(boxscoreData.players),
-          keys: boxscoreData ? Object.keys(boxscoreData) : []
-        });
-      }
+          keys: boxscoreData ? Object.keys(boxscoreData) : [],
+        },
+        'Missing or invalid boxscoreData.players',
+      );
       // Return teams with empty arrays if no players data
       return {
         teams: teams.map(team => ({
@@ -832,22 +834,24 @@ class GameTransformer {
     boxscoreData.players.forEach(teamPlayerData => {
       const team = teamPlayerData.team;
       if (!team) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[transformBoxscore] Missing team in teamPlayerData');
-        }
+        logger.debug({ component: 'gameTransformer', task: 'transformBoxscore' }, 'Missing team in teamPlayerData');
         return;
       }
       
       const stats = teamPlayerData.statistics?.[0];
       
       if (!stats || !stats.athletes) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[transformBoxscore] Missing stats or athletes for team:', team.id, {
+        logger.debug(
+          {
+            component: 'gameTransformer',
+            task: 'transformBoxscore',
+            teamId: team.id,
             hasStats: !!stats,
             hasAthletes: !!stats?.athletes,
-            statisticsLength: teamPlayerData.statistics?.length
-          });
-        }
+            statisticsLength: teamPlayerData.statistics?.length,
+          },
+          'Missing stats or athletes for team',
+        );
         return;
       }
 
@@ -996,20 +1000,21 @@ class GameTransformer {
    */
   extractTeamStatistics(boxscoreData, teams) {
     if (!boxscoreData?.teams) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[extractTeamStatistics] Missing boxscoreData.teams');
-      }
+      logger.debug({ component: 'gameTransformer', task: 'extractTeamStatistics' }, 'Missing boxscoreData.teams');
       return null;
     }
-    
+
     if (!teams || teams.length < 2) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[extractTeamStatistics] Invalid teams array:', {
+      logger.debug(
+        {
+          component: 'gameTransformer',
+          task: 'extractTeamStatistics',
           hasTeams: !!teams,
           teamsLength: teams?.length,
-          teamsType: typeof teams
-        });
-      }
+          teamsType: typeof teams,
+        },
+        'Invalid teams array',
+      );
       return null;
     }
 
@@ -1137,16 +1142,19 @@ class GameTransformer {
     const boxscoreTeam2 = boxscoreData.teams.find(t => String(t.team?.id) === String(team2Id));
 
     if (!boxscoreTeam1 || !boxscoreTeam2) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[extractTeamStatistics] Failed to match teams:', {
+      logger.debug(
+        {
+          component: 'gameTransformer',
+          task: 'extractTeamStatistics',
           team1Id,
           team2Id,
           foundTeam1: !!boxscoreTeam1,
           foundTeam2: !!boxscoreTeam2,
-          boxscoreTeamIds: boxscoreData.teams.map(t => t.team?.id),
-          transformedTeamIds: teams.map(t => t.id || t.teamId)
-        });
-      }
+          boxscoreTeamIds: boxscoreData.teams.map((t) => t.team?.id),
+          transformedTeamIds: teams.map((t) => t.id || t.teamId),
+        },
+        'Failed to match teams',
+      );
       return null;
     }
 

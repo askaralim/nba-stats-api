@@ -7,6 +7,7 @@ const dateFormatter = require('../utils/dateFormatter');
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const { fetchWithRetry } = require('../utils/retry');
+const logger = require('../utils/logger');
 
 const ESPN_FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -92,7 +93,7 @@ class TeamService {
       this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } catch (error) {
-      console.error('Error fetching all teams:', error);
+      logger.error({ component: 'teamService', task: 'allTeams', err: error }, 'Error fetching all teams');
       throw error;
     }
   }
@@ -138,7 +139,7 @@ class TeamService {
       this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } catch (error) {
-      console.error(`Error fetching roster for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'roster', teamAbbreviation, err: error }, 'Error fetching roster');
       throw error;
     }
   }
@@ -167,7 +168,7 @@ class TeamService {
 
       return data.team;
     } catch (error) {
-      console.error(`Error fetching team info for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'info', teamAbbreviation, err: error }, 'Error fetching team info');
       throw error;
     }
   }
@@ -196,7 +197,7 @@ class TeamService {
 
       return data;
     } catch (error) {
-      console.error(`Error fetching team statistics for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'statistics', teamAbbreviation, err: error }, 'Error fetching team statistics');
       throw error;
     }
   }
@@ -226,7 +227,7 @@ class TeamService {
 
       return data;
     } catch (error) {
-      console.error(`Error fetching team schedule for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'scheduleRaw', teamAbbreviation, err: error }, 'Error fetching team schedule');
       throw error;
     }
   }
@@ -319,7 +320,7 @@ class TeamService {
 
       return transformedEvents;
     } catch (error) {
-      console.error(`Error transforming team schedule for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'scheduleTransform', teamAbbreviation, err: error }, 'Error transforming team schedule');
       throw error;
     }
   }
@@ -503,7 +504,7 @@ class TeamService {
 
       return leaders;
     } catch (error) {
-      console.error(`Error extracting team leaders for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'leaders', teamAbbreviation, err: error }, 'Error extracting team leaders');
       throw error;
     }
   }
@@ -661,7 +662,7 @@ class TeamService {
 
       return result;
     } catch (error) {
-      console.error(`Error extracting recent games for ${teamAbbreviation}:`, error);
+      logger.error({ component: 'teamService', task: 'recentGames', teamAbbreviation, err: error }, 'Error extracting recent games');
       throw error;
     }
   }
@@ -680,7 +681,7 @@ class TeamService {
     }
 
     try {
-      console.log('[TeamService] Calculating league-wide stat rankings...');
+      logger.info({ component: 'teamService', task: 'statRankings' }, 'Calculating league-wide stat rankings');
       
       // Fetch statistics for all teams in parallel (with concurrency limit)
       const batchSize = 5; // Smaller batch for stats (more data)
@@ -714,7 +715,7 @@ class TeamService {
               
               allTeamStats.set(abbr, teamTotals);
             } catch (error) {
-              console.error(`[TeamService] Failed to fetch stats for ${abbr}:`, error.message);
+              logger.error({ component: 'teamService', task: 'statRankings', teamAbbreviation: abbr, errorMessage: error.message }, 'Failed to fetch stats');
             }
           })
         );
@@ -777,10 +778,10 @@ class TeamService {
         timestamp: Date.now()
       });
 
-      console.log('[TeamService] Stat rankings calculated successfully');
+      logger.info({ component: 'teamService', task: 'statRankings' }, 'Stat rankings calculated successfully');
       return rankings;
     } catch (error) {
-      console.error('[TeamService] Error calculating stat rankings:', error);
+      logger.error({ component: 'teamService', task: 'statRankings', err: error }, 'Error calculating stat rankings');
       throw error;
     }
   }
@@ -811,7 +812,7 @@ class TeamService {
       errors: []
     };
 
-    console.log(`[TeamService] Pre-fetching team info for ${this.allTeamAbbreviations.length} teams...`);
+    logger.info({ component: 'teamService', task: 'prefetchAllTeamInfo', count: this.allTeamAbbreviations.length }, 'Pre-fetching team info');
 
     // Fetch all teams in parallel (with concurrency limit to avoid overwhelming the API)
     const batchSize = 10; // Process 10 teams at a time
@@ -831,7 +832,7 @@ class TeamService {
           } catch (error) {
             results.failed++;
             results.errors.push({ team: abbr, error: error.message });
-            console.error(`[TeamService] Failed to fetch team info for ${abbr}:`, error.message);
+            logger.error({ component: 'teamService', task: 'prefetchAllTeamInfo', teamAbbreviation: abbr, errorMessage: error.message }, 'Failed to fetch team info');
           }
         })
       );
@@ -842,9 +843,9 @@ class TeamService {
       }
     }
 
-    console.log(`[TeamService] Pre-fetch completed: ${results.success} succeeded, ${results.failed} failed`);
+    logger.info({ component: 'teamService', task: 'prefetchAllTeamInfo', succeeded: results.success, failed: results.failed }, 'Pre-fetch completed');
     if (results.errors.length > 0) {
-      console.error(`[TeamService] Errors:`, results.errors);
+      logger.error({ component: 'teamService', task: 'prefetchAllTeamInfo', errors: results.errors }, 'Pre-fetch errors');
     }
 
     return results;

@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const logger = require('../utils/logger');
 
 const SAMPLE_DIR = path.resolve(__dirname, '../../docs/espn-samples');
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -37,7 +38,7 @@ async function fetchJson(url, label) {
     const data = await res.json();
     return { ok: true, data };
   } catch (err) {
-    console.error(`  ✗ ${label}: ${err.message}`);
+    logger.error({ component: 'captureEspn', label, errorMessage: err.message }, 'Sample fetch failed');
     return { ok: false, error: err.message };
   }
 }
@@ -45,7 +46,7 @@ async function fetchJson(url, label) {
 async function main() {
   if (!fs.existsSync(SAMPLE_DIR)) {
     fs.mkdirSync(SAMPLE_DIR, { recursive: true });
-    console.log(`Created ${SAMPLE_DIR}\n`);
+    logger.info({ component: 'captureEspn', dir: SAMPLE_DIR }, 'Created sample directory');
   }
 
   const today = new Date();
@@ -53,12 +54,12 @@ async function main() {
 
   // 1. Fetch scoreboard first to get a real gameId for summary
   const scoreboardUrl = `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${dateStr}`;
-  console.log('Fetching scoreboard to get gameId...');
+  logger.info({ component: 'captureEspn' }, 'Fetching scoreboard to get gameId');
   const sb = await fetchJson(scoreboardUrl, 'scoreboard');
   let gameId = '401810743'; // fallback
   if (sb.ok && sb.data?.events?.length > 0) {
     gameId = sb.data.events[0].id;
-    console.log(`  Using gameId: ${gameId}\n`);
+    logger.info({ component: 'captureEspn', gameId }, 'Using gameId');
   }
 
   const endpoints = [
@@ -161,27 +162,26 @@ async function main() {
     }
   ];
 
-  console.log(`Capturing ${endpoints.length} ESPN API samples...\n`);
+  logger.info({ component: 'captureEspn', total: endpoints.length }, 'Capturing ESPN API samples');
 
   for (const ep of endpoints) {
-    process.stdout.write(`  ${ep.file}... `);
     const result = await fetchJson(ep.url, ep.desc);
     if (result.ok) {
       const outPath = path.join(SAMPLE_DIR, ep.file);
       fs.writeFileSync(outPath, JSON.stringify(result.data, null, 2), 'utf8');
-      const size = (fs.statSync(outPath).size / 1024).toFixed(1);
-      console.log(`✓ (${size} KB)`);
+      const sizeKb = +(fs.statSync(outPath).size / 1024).toFixed(1);
+      logger.info({ component: 'captureEspn', file: ep.file, sizeKb }, 'Saved sample');
     } else {
-      console.log('skipped');
+      logger.warn({ component: 'captureEspn', file: ep.file }, 'Skipped');
     }
     // Small delay to avoid rate limiting
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 300));
   }
 
-  console.log(`\nDone. Samples saved to ${SAMPLE_DIR}`);
+  logger.info({ component: 'captureEspn', dir: SAMPLE_DIR }, 'Done; samples saved');
 }
 
-main().catch(err => {
-  console.error(err);
+main().catch((err) => {
+  logger.error({ component: 'captureEspn', err }, 'Capture run failed');
   process.exit(1);
 });

@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const logger = require('./utils/logger');
 const WebServer = require('./server');
 
 const PORT = process.env.PORT || 3000;
@@ -11,13 +12,13 @@ let shutting = false;
 async function shutdown(signal) {
   if (shutting) return;
   shutting = true;
-  console.log(`[Shutdown] Received ${signal}, draining...`);
+  logger.info({ component: 'shutdown', signal }, 'Received signal, draining');
   try {
     await server.stop();
-    console.log('[Shutdown] Clean exit.');
+    logger.info({ component: 'shutdown' }, 'Clean exit');
     process.exit(0);
   } catch (err) {
-    console.error('[Shutdown] Error during shutdown:', err);
+    logger.error({ component: 'shutdown', err }, 'Error during shutdown');
     process.exit(1);
   }
 }
@@ -26,9 +27,9 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[Process] Unhandled promise rejection:', reason);
+  logger.fatal({ component: 'process', err: reason }, 'Unhandled promise rejection');
 });
 process.on('uncaughtException', (err) => {
-  console.error('[Process] Uncaught exception:', err);
+  logger.fatal({ component: 'process', err }, 'Uncaught exception');
 });
 

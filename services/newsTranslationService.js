@@ -6,6 +6,7 @@
 
 const db = require('../config/db');
 const openaiService = require('./openaiService');
+const logger = require('../utils/logger');
 
 const BATCH_SIZE = parseInt(process.env.NEWS_TRANSLATION_BATCH_SIZE || '5', 10);
 const DELAY_MS = parseInt(process.env.NEWS_TRANSLATION_DELAY_MS || '1000', 10);
@@ -70,7 +71,7 @@ async function translateOne(row) {
     await updateTranslation(row.id, result, 'completed');
     return true;
   } catch (error) {
-    console.error(`[NewsTranslation] Failed to translate ${row.id}:`, error.message);
+    logger.error({ component: 'newsTranslation', rowId: row.id, errorMessage: error.message }, 'Failed to translate');
     await updateTranslation(row.id, null, 'failed', error.message);
     return false;
   }
@@ -82,12 +83,12 @@ async function translateOne(row) {
  */
 async function runTranslation() {
   if (!db.isConfigured) {
-    console.warn('[NewsTranslation] Database not configured');
+    logger.warn({ component: 'newsTranslation' }, 'Database not configured');
     return { processed: 0, succeeded: 0, failed: 0 };
   }
 
   if (!openaiService.apiKey) {
-    console.warn('[NewsTranslation] OpenAI API key not configured');
+    logger.warn({ component: 'newsTranslation' }, 'OpenAI API key not configured');
     return { processed: 0, succeeded: 0, failed: 0 };
   }
 
@@ -96,7 +97,7 @@ async function runTranslation() {
     return { processed: 0, succeeded: 0, failed: 0 };
   }
 
-  console.log(`[NewsTranslation] Processing ${pending.length} pending articles...`);
+  logger.info({ component: 'newsTranslation', pending: pending.length }, 'Processing pending articles');
   let succeeded = 0;
   let failed = 0;
 
@@ -110,7 +111,7 @@ async function runTranslation() {
     }
   }
 
-  console.log(`[NewsTranslation] Done: ${succeeded} succeeded, ${failed} failed`);
+  logger.info({ component: 'newsTranslation', succeeded, failed }, 'Translation run complete');
   return { processed: pending.length, succeeded, failed };
 }
 

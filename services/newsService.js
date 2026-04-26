@@ -8,6 +8,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
 const dateFormatter = require('../utils/dateFormatter');
+const logger = require('../utils/logger');
 
 class NewsService {
   constructor() {
@@ -72,7 +73,7 @@ class NewsService {
   rotateInstance() {
     this.currentInstanceIndex = (this.currentInstanceIndex + 1) % this.nitterInstances.length;
     const instance = this.getCurrentInstance();
-    console.log(`Switching to Nitter instance: ${instance.url} (Puppeteer: ${instance.usePuppeteer})`);
+    logger.info({ component: 'newsService', task: 'nitterRotate', instanceUrl: instance.url, usePuppeteer: instance.usePuppeteer }, 'Switching Nitter instance');
   }
 
   /**
@@ -120,7 +121,7 @@ class NewsService {
       
       return null;
     } catch (error) {
-      console.warn(`Failed to parse timestamp: ${timeStr}`, error.message);
+      logger.warn({ component: 'newsService', timeStr, errorMessage: error.message }, 'Failed to parse timestamp');
       return null;
     }
   }
@@ -250,7 +251,7 @@ class NewsService {
   async getShamsTweets(_forceRefresh = false) {
     // Prevent concurrent requests - if one is already in progress, wait for it
     if (this.fetchingPromise) {
-      console.log('Another request is already in progress, waiting for it...');
+      logger.info({ component: 'newsService' }, 'Another request is already in progress, waiting');
       return this.fetchingPromise;
     }
 
@@ -280,14 +281,14 @@ class NewsService {
       const url = `${nitterUrl}/${username}`;
       
       try {
-        console.log(`Attempting to fetch tweets from ${url} (Puppeteer: ${instance.usePuppeteer})...`);
+        logger.info({ component: 'newsService', url, usePuppeteer: instance.usePuppeteer }, 'Attempting to fetch tweets');
         
         let html = '';
         
         if (instance.usePuppeteer) {
           // Use Puppeteer for instances with bot protection
           // These take longer, so we use a longer timeout
-          console.log(`Using Puppeteer for ${nitterUrl} - this may take up to 60 seconds...`);
+          logger.info({ component: 'newsService', nitterUrl }, 'Using Puppeteer; may take up to 60s');
           const browser = await this.getBrowser();
           const page = await browser.newPage();
           
@@ -304,19 +305,19 @@ class NewsService {
             // Wait for tweets to load (or bot protection to pass)
             try {
               await page.waitForSelector('div.timeline-item', { timeout: 40000 });
-              console.log(`Tweets found on ${nitterUrl}`);
+              logger.info({ component: 'newsService', nitterUrl }, 'Tweets found');
             } catch (waitError) {
-              console.log(`Initial wait failed, checking for bot protection...`);
+              logger.info({ component: 'newsService' }, 'Initial wait failed, checking for bot protection');
               // Check if we're stuck on bot protection
               const pageContent = await page.content();
               if (this.hasBotProtection(pageContent)) {
-                console.warn('Bot protection detected, waiting up to 20 seconds for it to pass...');
+                logger.warn({ component: 'newsService' }, 'Bot protection detected; waiting up to 20s');
                 // Wait longer for bot protection to pass
                 await new Promise(resolve => setTimeout(resolve, 10000));
                 // Try waiting again with longer timeout
                 try {
                   await page.waitForSelector('div.timeline-item', { timeout: 40000 });
-                  console.log(`Tweets loaded after bot protection passed`);
+                  logger.info({ component: 'newsService' }, 'Tweets loaded after bot protection passed');
                 } catch (retryError) {
                   // If still failing, check if page has any content
                   const finalContent = await page.content();
@@ -332,7 +333,7 @@ class NewsService {
                   if (!hasTweets) {
                     throw new Error('No tweets found on page after waiting');
                   }
-                  console.log(`Tweets found using alternative selectors`);
+                  logger.info({ component: 'newsService' }, 'Tweets found using alternative selectors');
                 }
               } else {
                 // Maybe tweets are loading differently, check for alternative selectors
@@ -344,13 +345,13 @@ class NewsService {
                 if (!hasTweets) {
                   throw new Error('No tweets found on page');
                 }
-                console.log(`Tweets found using alternative selectors`);
+                logger.info({ component: 'newsService' }, 'Tweets found using alternative selectors');
               }
             }
             
             html = await page.content();
           } catch (puppeteerError) {
-            console.error(`Puppeteer error for ${nitterUrl}:`, puppeteerError.message);
+            logger.error({ component: 'newsService', nitterUrl, errorMessage: puppeteerError.message }, 'Puppeteer error');
             await page.close().catch(() => {});
             throw puppeteerError;
           } finally {
@@ -376,7 +377,7 @@ class NewsService {
           
           // Check if bot protection was triggered even though we didn't expect it
           if (this.hasBotProtection(html)) {
-            console.warn('Bot protection detected on instance that should not have it, switching to Puppeteer...');
+            logger.warn({ component: 'newsService' }, 'Bot protection detected on non-Puppeteer instance; switching to Puppeteer');
             // Retry with Puppeteer
             const browser = await this.getBrowser();
             const page = await browser.newPage();
@@ -409,7 +410,7 @@ class NewsService {
                   timestamp = new Date().toISOString();
                 }
               } catch (dateError) {
-                console.warn(`Error parsing timestamp for tweet ${index}:`, dateError.message);
+                logger.warn({ component: 'newsService', tweetIndex: index, errorMessage: dateError.message }, 'Error parsing timestamp');
                 timestamp = new Date().toISOString();
               }
               
@@ -433,13 +434,13 @@ class NewsService {
               };
             });
 
-          console.log(`Successfully extracted ${formattedTweets.length} tweets from ${username} via ${nitterUrl}`);
+          logger.info({ component: 'newsService', username, nitterUrl, tweetCount: formattedTweets.length }, 'Successfully extracted tweets');
           return formattedTweets;
         } else {
           throw new Error('No tweets found on page');
         }
       } catch (error) {
-        console.error(`Error fetching from ${nitterUrl}:`, error.message);
+        logger.error({ component: 'newsService', nitterUrl, errorMessage: error.message }, 'Error fetching from Nitter instance');
         lastError = error;
         
         // Try next instance
@@ -450,8 +451,7 @@ class NewsService {
     }
 
     // All instances failed for this account
-    console.error(`All Nitter instances failed for ${username} after trying all options.`);
-    console.error('Last error:', lastError?.message);
+    logger.error({ component: 'newsService', username, lastErrorMessage: lastError?.message }, 'All Nitter instances failed');
     return []; // Return empty array, will be handled by caller
   }
 
@@ -462,7 +462,7 @@ class NewsService {
   async _fetchAllAccountsTweets() {
     const allTweets = [];
     
-    console.log(`Fetching tweets from ${this.nbaNewsAccounts.length} NBA news accounts...`);
+    logger.info({ component: 'newsService', accountCount: this.nbaNewsAccounts.length }, 'Fetching tweets from NBA news accounts');
     
     // Fetch from all accounts in parallel (with concurrency limit)
     const batchSize = 2; // Process 2 accounts at a time to avoid overwhelming Nitter
@@ -479,7 +479,7 @@ class NewsService {
             );
             return tweets;
           } catch (error) {
-            console.error(`Error fetching tweets from ${account.username}:`, error.message);
+            logger.error({ component: 'newsService', username: account.username, errorMessage: error.message }, 'Error fetching tweets for account');
             return [];
           }
         })
@@ -490,7 +490,7 @@ class NewsService {
         if (result.status === 'fulfilled' && Array.isArray(result.value)) {
           allTweets.push(...result.value);
         } else {
-          console.warn(`Failed to fetch from ${batch[index].username}`);
+          logger.warn({ component: 'newsService', username: batch[index].username }, 'Failed to fetch tweets');
         }
       });
       
@@ -508,9 +508,6 @@ class NewsService {
     });
     
     // Limit to latest 30 tweets total
-    // const limitedTweets = allTweets.slice(0, 30);
-
-    // console.log(`Successfully fetched ${limitedTweets.length} tweets from ${this.nbaNewsAccounts.length} accounts`);
     return allTweets;
   }
 
