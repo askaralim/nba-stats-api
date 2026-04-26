@@ -6,50 +6,20 @@
 const dateFormatter = require('./dateFormatter');
 const { getTeamNameZhCn, getTeamCityZhCn } = require('./teamTranslations');
 const { formatPlayerNameForDisplay } = require('./playerName');
+const gameMeta = require('./transform/gameMeta');
+const playerScoring = require('./transform/playerScoring');
 
 class GameTransformer {
-  /**
-   * Map ESPN status to internal status code
-   * @param {string} espnStatus - ESPN status name
-   * @returns {number} Status code (1=Scheduled, 2=Live, 3=Final)
-   */
   mapStatus(espnStatus) {
-    const statusMap = {
-      'STATUS_SCHEDULED': 1,
-      'STATUS_IN_PROGRESS': 2,
-      'STATUS_FINAL': 3,
-      'STATUS_FINAL_OVERTIME': 3,
-      'STATUS_DELAYED': 1,
-      'STATUS_POSTPONED': 6,
-      'STATUS_SUSPENDED': 2,
-      'STATUS_HALFTIME': 2,
-      'STATUS_END_PERIOD': 2
-    };
-    return statusMap[espnStatus] || 1;
+    return gameMeta.mapStatus(espnStatus);
   }
 
-  /**
-   * Parse W-L record string
-   * @param {string} summary - Record string like "24-1"
-   * @returns {Object} { wins, losses }
-   */
   parseRecord(summary) {
-    if (!summary) return { wins: 0, losses: 0 };
-    const [wins, losses] = summary.split('-').map(Number);
-    return { wins: wins || 0, losses: losses || 0 };
+    return gameMeta.parseRecord(summary);
   }
 
-  /**
-   * ESPN scoreboard competitors usually use `record: [{ type, summary }, ...]`.
-   * In some contexts (e.g. postseason) `record` may be a single object instead of an array.
-   * @param {unknown} recordOrRecords
-   * @returns {Array<Object>}
-   */
   recordsAsArray(recordOrRecords) {
-    if (recordOrRecords == null) return [];
-    if (Array.isArray(recordOrRecords)) return recordOrRecords;
-    if (typeof recordOrRecords === 'object') return [recordOrRecords];
-    return [];
+    return gameMeta.recordsAsArray(recordOrRecords);
   }
 
   /**
@@ -113,151 +83,28 @@ class GameTransformer {
     };
   }
 
-  /**
-   * Check if game is a marquee matchup
-   * @param {Object} game - Game object
-   * @returns {boolean} True if marquee matchup
-   */
   isMarqueeMatchup(game) {
-    // Support both old and new field names during migration
-    const awayAbbr = (game?.awayTeam?.abbreviation || game?.awayTeam?.teamTricode || game?.awayTeam?.teamAbbreviation || '').toUpperCase();
-    const homeAbbr = (game?.homeTeam?.abbreviation || game?.homeTeam?.teamTricode || game?.homeTeam?.teamAbbreviation || '').toUpperCase();
-    
-    if (!awayAbbr || !homeAbbr) return false;
-    
-    // Any game involving GSW is a marquee matchup
-    if (awayAbbr === 'GS' || homeAbbr === 'GS' || awayAbbr === 'LAL' || homeAbbr === 'LAL') {
-      return true;
-    }
-    
-    // Additional manually configured marquee matchups
-    const marqueeMatchups = [
-      ['OKC', 'DEN'], ['DEN', 'OKC'],
-      ['OKC', 'SA'], ['SA', 'OKC'],
-      ['DEN', 'SA'], ['SA', 'DEN'],
-      ['BOS', 'SA'], ['SA', 'BOS'],
-    ];
-    
-    const matchup = [awayAbbr, homeAbbr];
-    return marqueeMatchups.some(m => 
-      m[0] === matchup[0] && m[1] === matchup[1]
-    );
+    return gameMeta.isMarqueeMatchup(game);
   }
 
-  /**
-   * Check if game went to overtime
-   * @param {Object} game - Game object
-   * @returns {boolean} True if OT game
-   */
   isOvertimeGame(game) {
-    // Check if period > 4 (OT games)
-    return game?.period > 4 || 
-           (game?.gameStatusText && game.gameStatusText.toLowerCase().includes('ot')) ||
-           (game?.gameStatusText && game.gameStatusText.toLowerCase().includes('overtime'));
+    return gameMeta.isOvertimeGame(game);
   }
 
-  /**
-   * Calculate score difference for games with scores
-   * @param {Object} game - Game object
-   * @returns {number|null} Score difference or null if scores not available
-   */
   getScoreDifference(game) {
-    // Don't calculate for scheduled games
-    if (game.gameStatus === 1) return null;
-    // Works for both live (status 2) and completed (status 3) games
-    if (game?.awayTeam?.score === null || game?.homeTeam?.score === null) return null;
-    // Don't consider 0-0 as a valid score difference (scheduled games with default scores)
-    if (game.awayTeam.score === 0 && game.homeTeam.score === 0) return null;
-    
-    return Math.abs(game.awayTeam.score - game.homeTeam.score);
+    return gameMeta.getScoreDifference(game);
   }
 
-  /**
-   * Check if game is closest (score difference <= 5)
-   * Only works for live or finished games, not scheduled games
-   * @param {Object} game - Game object
-   * @returns {boolean} True if closest game
-   */
   isClosestGame(game) {
-    // Only consider live or finished games, not scheduled games
-    if (game.gameStatus === 1) {
-      return false;
-    }
-    const scoreDiff = this.getScoreDifference(game);
-    return scoreDiff !== null && scoreDiff <= 5;
+    return gameMeta.isClosestGame(game);
   }
 
-  /**
-   * Get game priority for sorting
-   * Lower number = higher priority
-   * @param {Object} game - Game object
-   * @returns {number} Priority value
-   */
   getGamePriority(game) {
-    const isLive = game.gameStatus === 2;
-    const isMarquee = this.isMarqueeMatchup(game);
-    const isOT = this.isOvertimeGame(game);
-    const isClosest = this.isClosestGame(game);
-    const isScheduled = game.gameStatus === 1;
-    const isFinished = game.gameStatus === 3;
-
-    // Priority 1: Live marquee games
-    if (isLive && isMarquee) return 1;
-    
-    // Priority 2: Live closest games
-    if (isLive && isClosest) return 2;
-    
-    // Priority 3: Live OT games
-    if (isLive && isOT) return 3;
-    
-    // Priority 4: Live games (other)
-    if (isLive) return 4;
-    
-    // Priority 5: Closest games (even if finished)
-    if (isClosest) return 5;
-    
-    // Priority 6: OT games (even if finished)
-    if (isOT) return 6;
-    
-    // Priority 7: Scheduled games
-    if (isScheduled) return 7;
-    
-    // Priority 8: Regular finished games
-    if (isFinished) return 8;
-    
-    // Default (shouldn't happen)
-    return 9;
+    return gameMeta.getGamePriority(game);
   }
 
-  /**
-   * Sort games by priority
-   * @param {Array} games - Array of game objects
-   * @returns {Array} Sorted games array
-   */
   sortGamesByPriority(games) {
-    if (!games || games.length === 0) {
-      return [];
-    }
-
-    return [...games].sort((a, b) => {
-      const priorityA = this.getGamePriority(a);
-      const priorityB = this.getGamePriority(b);
-      
-      // Sort by priority first
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB;
-      }
-      
-      // If same priority and both are closest games, sort by score difference
-      const scoreDiffA = this.getScoreDifference(a);
-      const scoreDiffB = this.getScoreDifference(b);
-      if (scoreDiffA !== null && scoreDiffB !== null) {
-        return scoreDiffA - scoreDiffB;
-      }
-      
-      // Maintain original order for same priority
-      return 0;
-    });
+    return gameMeta.sortGamesByPriority(games);
   }
 
   /**
@@ -1133,158 +980,12 @@ class GameTransformer {
     };
   }
 
-  /**
-   * Calculate Game Impact Score (GIS) for a player
-   * GIS = PTS + 1.2 × REB + 1.5 × AST + 3 × STL + 3 × BLK - 1 × TOV
-   * @param {Object} player - Player object with stats
-   * Calculate Game Impact Score (GIS)
-   * Inspired by Hollinger Game Score, with bonuses/penalties tuned for our UX.
-   * @param {Object} player - Player with `stats` object from ESPN boxscore
-   * @param {boolean} teamWon - Whether the player's team won the game
-   * @returns {number} Game Impact Score
-   */
   calculateGIS(player, teamWon) {
-    if (!player?.stats) return 0;
-
-    const pts = parseInt(player.stats.points) || 0;
-    const reb = parseInt(player.stats.rebounds) || 0;
-    const ast = parseInt(player.stats.assists) || 0;
-    const stl = parseInt(player.stats.steals) || 0;
-    const blk = parseInt(player.stats.blocks) || 0;
-    const tov = parseInt(player.stats.turnovers) || 0;
-    const fouls = parseInt(player.stats.fouls) || 0;
-
-    const fga = parseInt(player.stats.fieldGoals ? player.stats.fieldGoals.split('-')[1] : 0) || 0;
-    const fgm = parseInt(player.stats.fieldGoals ? player.stats.fieldGoals.split('-')[0] : 0) || 0;
-
-    const fta = parseInt(player.stats.freeThrows ? player.stats.freeThrows.split('-')[1] : 0) || 0;
-    const ftm = parseInt(player.stats.freeThrows ? player.stats.freeThrows.split('-')[0] : 0) || 0;
-
-    const dreb = parseInt(player.stats.defensiveRebounds) || 0;
-    const orb = parseInt(player.stats.offensiveRebounds) || 0;
-
-    const threePM = parseInt(player.stats.threePointers ? player.stats.threePointers.split('-')[0] : 0) || 0;
-    const threePA = parseInt(player.stats.threePointers ? player.stats.threePointers.split('-')[1] : 0) || 0;
-
-    let score =
-      (1.0 * pts) +
-      (1.2 * reb) +
-      (1.2 * ast) +
-      (2.0 * stl) +
-      (1.6 * blk) +
-      (
-        (0.6 * fgm) - (0.5 * (fga - fgm)) +
-        (0.2 * ftm) - (0.4 * (fta - ftm)) +
-        (0.7 * threePM) - (0.6 * (threePA - threePM))
-      ) +
-      (ast * 0.3 - tov * 1.5) +
-      (stl * 0.5 + blk * 0.4 + dreb * 0.3) -
-      (tov * 0.5 + fouls * 0.5);
-
-    if (teamWon) {
-      score += 2;
-    }
-
-    const fgPct = fga > 0 ? fgm / fga : 0;
-    if ((pts + ast > 40) && (fgPct > 0.5)) {
-      score += 2;
-    }
-
-    if (pts > 10 && reb > 10 && ast > 10) {
-      score += 3;
-    }
-
-    if (pts >= 40 && fgPct > 0.6) {
-      score += 6;
-    }
-    
-    if (ast >= 12) {
-      score += 2;
-    }
-    
-    if (reb >= 15) {
-      score += 2;
-    }
-    
-    if (stl >= 4 || blk >= 4) {
-      score += 2;
-    }
-
-    if (fgPct < 0.35 && fga > 10) {
-      score -= 5;
-    }
-
-    if (fgPct > 0.6 && fga > 15) {
-      score += 4;
-    }
-
-    return Number(score.toFixed(1));
+    return playerScoring.calculateGIS(player, teamWon);
   }
 
-  /**
-   * Calculate Game MVP ("Who carried?") — top GIS player on the winning team.
-   * Falls back to all players if winningTeamId is unknown or filters to empty.
-   * @param {Array} allPlayers - All players from both teams
-   * @param {Array} teams - Teams array with team info
-   * @param {string|null} winningTeamId - ID of the winning team (null if tie or not determined)
-   * @returns {Object|null} Game MVP player object
-   */
   calculateGameMVP(allPlayers, teams = [], winningTeamId) {
-    if (!allPlayers || allPlayers.length === 0) {
-      return null;
-    }
-
-    // Filter to only players from winning team if winning team is determined
-    let eligiblePlayers = allPlayers;
-    if (winningTeamId) {
-      eligiblePlayers = allPlayers.filter(player => String(player.teamId) === String(winningTeamId));
-      
-      // If no players from winning team, fall back to all players
-      if (eligiblePlayers.length === 0) {
-        eligiblePlayers = allPlayers;
-      }
-    }
-
-    // Calculate GIS for eligible players and find the highest
-    let gameMVP = null;
-    let highestGIS = -Infinity;
-
-    eligiblePlayers.forEach(player => {
-      // Skip players who didn't play
-      if (player.didNotPlay) return;
-      const gis = this.calculateGIS(player, winningTeamId === player.teamId);
-      
-      if (gis > highestGIS) {
-        highestGIS = gis;
-        
-        // Find team info for this player
-        const playerTeam = teams.find(t => String(t.id) === String(player.teamId));
-        
-        gameMVP = {
-          athleteId: player.athleteId,
-          name: formatPlayerNameForDisplay(player.name || ''),
-          shortName: player.shortName,
-          jersey: player.jersey,
-          position: player.position,
-          headshot: player.headshot,
-          teamId: player.teamId,
-          teamAbbreviation: playerTeam?.abbreviation || '', // Use standardized 'abbreviation'
-          teamName: playerTeam?.name || '', // Use standardized 'name'
-          teamLogo: playerTeam?.logo || '',
-          gis: Math.round(gis * 10) / 10, // Round to 1 decimal place
-          stats: {
-            points: player.stats.points || 0,
-            rebounds: player.stats.rebounds || 0,
-            assists: player.stats.assists || 0,
-            steals: player.stats.steals || 0,
-            blocks: player.stats.blocks || 0,
-            turnovers: player.stats.turnovers || 0
-          }
-        };
-      }
-    });
-
-    return gameMVP;
+    return playerScoring.calculateGameMVP(allPlayers, teams, winningTeamId);
   }
 
   /**
