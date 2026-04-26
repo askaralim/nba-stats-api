@@ -107,10 +107,25 @@ async function healthCheck() {
   }
 }
 
+/**
+ * Close the shared pool (graceful shutdown).
+ * Safe to call when the pool is not configured.
+ * @returns {Promise<void>}
+ */
+async function closePool() {
+  if (!pool) return;
+  try {
+    await pool.end();
+  } catch (err) {
+    console.error('[DB] Failed to close pool cleanly:', err?.message || err);
+  }
+}
+
 module.exports = {
   getPool,
   query,
   getClient,
   healthCheck,
+  closePool,
   isConfigured: Boolean(pool),
 };

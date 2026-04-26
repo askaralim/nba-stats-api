@@ -26,6 +26,9 @@ class WebServer {
   constructor(port = 3000) {
     this.app = express();
     this.port = port;
+    this.httpServer = null;
+    this.cronTasks = [];
+    this.shuttingDown = false;
     this.setupMiddleware();
     this.setupRoutes();
     this.setupCronJobs();
@@ -104,8 +107,13 @@ class WebServer {
     // SCHEDULED CRON JOBS
     // ============================================
     
-    // News v2 Ingestion: Every 5 minutes (fetch, dedupe, insert into DB)
-    cron.schedule('*/5 * * * *', async () => {
+    const register = (task) => {
+      this.cronTasks.push(task);
+      return task;
+    };
+
+    register(cron.schedule('*/5 * * * *', async () => {
+      if (this.shuttingDown) return;
       console.log('[Cron] News ingestion (scheduled every 5 minutes)...');
       try {
         const result = await newsIngestionService.runIngestion();
@@ -113,10 +121,10 @@ class WebServer {
       } catch (error) {
         console.error('[Cron] ✗ News ingestion failed:', error);
       }
-    });
+    }));
 
-    // News v2 Translation: Every 3 minutes (translate pending articles)
-    cron.schedule('*/3 * * * *', async () => {
+    register(cron.schedule('*/3 * * * *', async () => {
+      if (this.shuttingDown) return;
       console.log('[Cron] News translation (scheduled every 3 minutes)...');
       try {
         const result = await newsTranslationService.runTranslation();
@@ -126,11 +134,10 @@ class WebServer {
       } catch (error) {
         console.error('[Cron] ✗ News translation failed:', error);
       }
-    });
+    }));
 
-    // Today's Games: Every 2 minutes during game hours (optional)
-    // Only refresh if there are live games to avoid unnecessary API calls
-    cron.schedule('*/2 * * * *', async () => {
+    register(cron.schedule('*/2 * * * *', async () => {
+      if (this.shuttingDown) return;
       console.log('[Cron] Refreshing today\'s games (scheduled every 2 minutes)...');
       try {
         await nbaService.getTodaysScoreboard();
@@ -138,10 +145,10 @@ class WebServer {
       } catch (error) {
         console.error('[Cron] ✗ Failed to refresh today\'s games:', error);
       }
-    });
+    }));
 
-    // Standings: Every 30 minutes (updates after games complete)
-    cron.schedule('*/30 * * * *', async () => {
+    register(cron.schedule('*/30 * * * *', async () => {
+      if (this.shuttingDown) return;
       console.log('[Cron] Refreshing standings (scheduled every 30 minutes)...');
       try {
         await standingsService.getStandings({ season: seasonDefaults.STANDINGS_YEAR, seasonType: seasonDefaults.STANDINGS_TYPE });
@@ -149,28 +156,29 @@ class WebServer {
       } catch (error) {
         console.error('[Cron] ✗ Failed to refresh standings:', error);
       }
-    });
+    }));
 
-    // Team Info: Every 30 minutes (static data, but refresh periodically)
-    cron.schedule('*/30 * * * *', async () => {
+    register(cron.schedule('*/30 * * * *', async () => {
+      if (this.shuttingDown) return;
       console.log('[Cron] Refreshing all team info (scheduled every 30 minutes)...');
       try {
-        const results = await teamService.prefetchAllTeamInfo(true); // Force refresh
+        const results = await teamService.prefetchAllTeamInfo(true);
         console.log(`[Cron] ✓ Team info refreshed: ${results.success} succeeded, ${results.failed} failed`);
       } catch (error) {
         console.error('[Cron] ✗ Failed to refresh team info:', error);
       }
-    });
+    }));
 
     // Push notifications: close games (last 5 min Q4+) + MVP GIS when a game ends.
     // Set DISABLE_PUSH_CRON=true in production until Expo/APNs delivery is verified end-to-end.
-    cron.schedule('* * * * *', async () => {
+    register(cron.schedule('* * * * *', async () => {
+      if (this.shuttingDown) return;
       try {
         await pushNotificationService.runScheduledChecks();
       } catch (error) {
         console.error('[Cron] ✗ Push notification check failed:', error);
       }
-    });
+    }));
 
     console.log('Cron jobs initialized:');
     console.log('  - News ingestion: every 5 minutes');
@@ -221,9 +229,48 @@ class WebServer {
   }
 
   start() {
-    this.app.listen(this.port, '0.0.0.0', () => {
+    this.httpServer = this.app.listen(this.port, '0.0.0.0', () => {
       console.log(`Server is running on http://0.0.0.0:${this.port}`);
     });
+    return this.httpServer;
+  }
+
+  /**
+   * Graceful shutdown: stop accepting new connections, halt cron tasks, close DB.
+   * @param {number} [timeoutMs=10000] - Hard deadline to force exit if listeners hang.
+   * @returns {Promise<void>}
+   */
+  async stop(timeoutMs = 10000) {
+    if (this.shuttingDown) return;
+    this.shuttingDown = true;
+
+    for (const task of this.cronTasks) {
+      try {
+        if (task && typeof task.stop === 'function') task.stop();
+      } catch (err) {
+        console.error('[Shutdown] Failed to stop cron task:', err?.message || err);
+      }
+    }
+
+    const closeHttp = new Promise((resolve) => {
+      if (!this.httpServer) return resolve();
+      this.httpServer.close((err) => {
+        if (err) console.error('[Shutdown] HTTP server close error:', err.message);
+        resolve();
+      });
+    });
+
+    const deadline = new Promise((resolve) => setTimeout(resolve, timeoutMs));
+    await Promise.race([closeHttp, deadline]);
+
+    try {
+      const db = require('./config/db');
+      if (typeof db.closePool === 'function') {
+        await db.closePool();
+      }
+    } catch (err) {
+      console.error('[Shutdown] DB close error:', err?.message || err);
+    }
   }
 
   getApp() {
