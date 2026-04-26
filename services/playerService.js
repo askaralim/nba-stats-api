@@ -5,6 +5,19 @@
 
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
+const { fetchWithRetry } = require('../utils/retry');
+
+const ESPN_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9'
+};
+
+const ESPN_RETRY_OPTIONS = {
+  maxRetries: 2,
+  initialDelay: 800,
+  maxDelay: 4000
+};
 
 class PlayerService {
   constructor() {
@@ -86,6 +99,23 @@ class PlayerService {
    * @param {Object} data - API response data
    * @returns {Object} Translated data
    */
+  /**
+   * Fetch JSON from ESPN with shared headers, retry-on-5xx, and timeout.
+   * @param {string} url - Fully formed ESPN URL
+   * @returns {Promise<Object>} Parsed JSON body
+   */
+  async fetchEspnJson(url) {
+    const response = await fetchWithRetry(
+      url,
+      { headers: ESPN_FETCH_HEADERS, timeout: 30000 },
+      ESPN_RETRY_OPTIONS
+    );
+    if (!response.ok) {
+      throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  }
+
   translateResponse(data) {
     if (!data) return data;
 
@@ -133,22 +163,8 @@ class PlayerService {
       });
 
       const url = `${this.baseUrl}/${playerId}/bio?${params.toString()}`;
+      const data = await this.fetchEspnJson(url);
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      // Bio data doesn't typically have labels/glossary, but translate if present
       const translatedData = this.translateResponse(data);
 
       // Cache the translated result
@@ -185,25 +201,10 @@ class PlayerService {
       });
 
       const url = `${this.baseUrl}/${playerId}/stats?${params.toString()}`;
+      const data = await this.fetchEspnJson(url);
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      // Translate labels and glossary
       const translatedData = this.translateResponse(data);
 
-      // Cache the translated result
       this.cache.set(cacheKey, {
         data: translatedData,
         timestamp: Date.now()
@@ -237,22 +238,8 @@ class PlayerService {
       });
 
       const url = `${this.baseUrl}/${playerId}?${params.toString()}`;
+      const data = await this.fetchEspnJson(url);
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      // Player info doesn't typically have labels/glossary, but translate if present
       const translatedData = this.translateResponse(data);
 
       // Cache the translated result
@@ -290,25 +277,10 @@ class PlayerService {
       });
 
       const url = `${this.baseUrl}/${playerId}/stats?${params.toString()}`;
+      const data = await this.fetchEspnJson(url);
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      // Translate labels and glossary
       const translatedData = this.translateResponse(data);
 
-      // Cache the translated result
       this.cache.set(cacheKey, {
         data: translatedData,
         timestamp: Date.now()
@@ -342,20 +314,7 @@ class PlayerService {
       });
 
       const url = `${this.baseUrl}/${playerId}/gamelog?${params.toString()}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.fetchEspnJson(url);
 
       // Translate labels and glossary
       const translatedData = this.translateResponse(data);

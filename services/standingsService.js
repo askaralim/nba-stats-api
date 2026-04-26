@@ -5,6 +5,7 @@
 
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const seasonDefaults = require('../config/seasonDefaults');
+const { fetchWithRetry } = require('../utils/retry');
 
 class StandingsService {
   constructor() {
@@ -124,13 +125,18 @@ class StandingsService {
 
       const url = `${this.baseUrl}?${params.toString()}`;
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
-        }
-      });
+      const response = await fetchWithRetry(
+        url,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9'
+          },
+          timeout: 30000
+        },
+        { maxRetries: 2, initialDelay: 800, maxDelay: 4000 }
+      );
 
       if (!response.ok) {
         throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);

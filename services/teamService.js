@@ -6,6 +6,19 @@
 const dateFormatter = require('../utils/dateFormatter');
 const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations');
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
+const { fetchWithRetry } = require('../utils/retry');
+
+const ESPN_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9'
+};
+
+const ESPN_RETRY_OPTIONS = {
+  maxRetries: 2,
+  initialDelay: 800,
+  maxDelay: 4000
+};
 
 class TeamService {
   constructor() {
@@ -19,6 +32,23 @@ class TeamService {
       'hou', 'ind', 'lac', 'lal', 'mem', 'mia', 'mil', 'min', 'no', 'ny',
       'okc', 'orl', 'phi', 'phx', 'por', 'sac', 'sa', 'tor', 'utah', 'was'
     ];
+  }
+
+  /**
+   * Fetch JSON from ESPN with retry-on-5xx, timeout, and standard headers.
+   * @param {string} url - Fully formed ESPN URL
+   * @returns {Promise<Object>} Parsed JSON body
+   */
+  async fetchEspnJson(url) {
+    const response = await fetchWithRetry(
+      url,
+      { headers: ESPN_FETCH_HEADERS, timeout: 30000 },
+      ESPN_RETRY_OPTIONS
+    );
+    if (!response.ok) {
+      throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
   }
 
   /**
@@ -36,13 +66,7 @@ class TeamService {
 
     try {
       const url = `${this.baseUrl}?region=us&lang=en`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.fetchEspnJson(url);
       const teams = data.sports?.[0]?.leagues?.[0]?.teams ?? [];
       const result = teams
         .map((item) => {
@@ -90,13 +114,7 @@ class TeamService {
     try {
       const slug = teamAbbreviation.toLowerCase();
       const url = `${this.baseUrl}/${slug}/roster?region=us&lang=en`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.fetchEspnJson(url);
       const athletes = data.athletes || [];
       const teamInfo = data.team || {};
 
@@ -140,15 +158,8 @@ class TeamService {
 
     try {
       const url = `${this.baseUrl}/${teamAbbreviation.toLowerCase()}?region=us&lang=en`;
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
+      const data = await this.fetchEspnJson(url);
 
-      const data = await response.json();
-      
-      // Cache the response
       this.cache.set(cacheKey, {
         data: data.team,
         timestamp: Date.now()
@@ -176,17 +187,10 @@ class TeamService {
 
     try {
       const url = `${this.baseUrl}/${teamAbbreviation.toLowerCase()}/athletes/statistics?region=us&lang=en&contentorigin=espn`;
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
+      const data = await this.fetchEspnJson(url);
 
-      const data = await response.json();
-      
-      // Cache the response
       this.cache.set(cacheKey, {
-        data: data,
+        data,
         timestamp: Date.now()
       });
 
@@ -213,22 +217,10 @@ class TeamService {
 
     try {
       const url = `${this.baseUrl}/${teamAbbreviation.toLowerCase()}/schedule?region=us&lang=en&seasontype=${seasonType}`;
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
-      }
+      const data = await this.fetchEspnJson(url);
 
-      const data = await response.json();
-      
-      // Cache the response
       this.cache.set(cacheKey, {
-        data: data,
+        data,
         timestamp: Date.now()
       });
 
