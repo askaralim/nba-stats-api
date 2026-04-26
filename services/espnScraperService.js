@@ -153,6 +153,10 @@ class ESPNScraperService {
     };
   }
 
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   /**
    * One GET to ESPN site leaders. Omit `season` / `seasontype` when null so ESPN uses the current segment.
    * @returns {Promise<{ ok: boolean, status: number, data: object | null }>}
@@ -168,12 +172,16 @@ class ESPNScraperService {
     if (seasonYear != null) params.set('season', String(seasonYear));
     if (seasontype != null) params.set('seasontype', String(seasontype));
     const url = `${seasonDefaults.LEADERS_API_URL}?${params.toString()}`;
-    const response = await fetch(url, { headers: this.leadersFetchHeaders() });
-    if (!response.ok) {
-      return { ok: false, status: response.status, data: null };
+    try {
+      const response = await fetch(url, { headers: this.leadersFetchHeaders() });
+      if (!response.ok) {
+        return { ok: false, status: response.status, data: null };
+      }
+      const data = await response.json();
+      return { ok: true, status: response.status, data };
+    } catch {
+      return { ok: false, status: 0, data: null };
     }
-    const data = await response.json();
-    return { ok: true, status: response.status, data };
   }
 
   /**
@@ -272,25 +280,50 @@ class ESPNScraperService {
     return out;
   }
 
+  buildEmptyTopPlayersByStat() {
+    const out = {};
+    for (const def of PLAYER_LEADER_CATEGORY_MAP) {
+      out[def.statName] = {
+        title: def.title,
+        description: def.description,
+        players: [],
+      };
+    }
+    return out;
+  }
+
   async fetchLeadersJsonResilient(paramAttempts, limit) {
     let lastStatus = 0;
+    const maxRetriesPerAttempt = 2;
     for (const att of paramAttempts) {
-      const result = await this.fetchLeadersOnce({
-        limit,
-        seasonYear: att.seasonYear,
-        seasontype: att.seasontype,
-      });
-      if (result.ok && result.data) {
-        return result.data;
-      }
-      lastStatus = result.status;
-      const retryable =
-        result.status === 404 ||
-        result.status === 500 ||
-        result.status === 502 ||
-        result.status === 503;
-      if (!retryable) {
-        throw new Error(`ESPN Leaders API error: ${result.status}`);
+      for (let retry = 0; retry <= maxRetriesPerAttempt; retry += 1) {
+        const result = await this.fetchLeadersOnce({
+          limit,
+          seasonYear: att.seasonYear,
+          seasontype: att.seasontype,
+        });
+        if (result.ok && result.data) {
+          return result.data;
+        }
+        lastStatus = result.status;
+        const retryable =
+          result.status === 0 ||
+          result.status === 404 ||
+          result.status === 408 ||
+          result.status === 429 ||
+          result.status === 500 ||
+          result.status === 502 ||
+          result.status === 503 ||
+          result.status === 504;
+
+        if (!retryable) {
+          throw new Error(`ESPN Leaders API error: ${result.status}`);
+        }
+
+        if (retry < maxRetriesPerAttempt) {
+          const backoffMs = 250 * (2 ** retry);
+          await this.sleep(backoffMs);
+        }
       }
     }
     throw new Error(`ESPN Leaders API error: ${lastStatus || 'unknown'} (no param fallback succeeded)`);
@@ -365,7 +398,36 @@ class ESPNScraperService {
       return transformedData;
     } catch (error) {
       console.error('Error fetching ESPN player stats (leaders):', error);
-      throw error;
+      const isLeadersFetchError =
+        error &&
+        typeof error.message === 'string' &&
+        error.message.startsWith('ESPN Leaders API error:');
+
+      if (!isLeadersFetchError) {
+        throw error;
+      }
+
+      const fallbackTopPlayersByStat = this.buildEmptyTopPlayersByStat();
+      const fallbackSeasonMeta = await this.resolveSeasonMeta(requestedSeasonType);
+      const fallbackData = {
+        metadata: {
+          season: `${year}-${year + 1}`,
+          seasonType: requestedSeasonType === 3 ? 'Postseason' : 'Regular Season',
+          seasonTypeId: requestedSeasonType,
+          position: position === 'all-positions' ? 'All Positions' : position,
+          totalCount: 0,
+        },
+        topPlayersByStat: fallbackTopPlayersByStat,
+        seasonMeta: fallbackSeasonMeta,
+      };
+
+      // Short cache to reduce repeated upstream failures during ESPN outages.
+      this.cache.set(cacheKey, {
+        data: fallbackData,
+        timestamp: Date.now(),
+      });
+
+      return fallbackData;
     }
   }
 

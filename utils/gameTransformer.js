@@ -1211,8 +1211,8 @@ class GameTransformer {
       score += 3;
     }
 
-    if (pts >= 35 && fgPct > 0.55) {
-      score += 3;
+    if (pts >= 40 && fgPct > 0.6) {
+      score += 6;
     }
     
     if (ast >= 12) {
@@ -1229,6 +1229,10 @@ class GameTransformer {
 
     if (fgPct < 0.35 && fga > 10) {
       score -= 5;
+    }
+
+    if (fgPct > 0.6 && fga > 15) {
+      score += 4;
     }
 
     // score = Math.min(100, Math.max(0, score * 2));
