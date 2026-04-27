@@ -28,6 +28,19 @@ async function getByEspnTeamId(espnTeamId) {
  * @param {string|null} [team.city]
  * @param {string|null} [team.logo_url]
  */
+/**
+ * All cached team rows (for full-list read-through).
+ * @returns {Promise<import('pg').QueryResultRow[]>}
+ */
+async function listAll() {
+  if (!db.isConfigured) return [];
+  const { rows } = await db.query(
+    `SELECT espn_team_id, abbreviation, slug, name, city, logo_url, fetched_at, updated_at
+     FROM teams`
+  );
+  return rows;
+}
+
 async function upsertTeam(team) {
   if (!db.isConfigured) return;
   const {
@@ -63,5 +76,6 @@ async function upsertTeam(team) {
 
 module.exports = {
   getByEspnTeamId,
+  listAll,
   upsertTeam,
 };

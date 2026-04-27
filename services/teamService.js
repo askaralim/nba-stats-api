@@ -62,12 +62,80 @@ class TeamService {
    * Uses ESPN API: /apis/site/v2/sports/basketball/nba/teams
    * @returns {Promise<Array>} Array of team objects with id, abbreviation, name, displayName, logo, etc.
    */
+  /**
+   * When Postgres has one row per NBA team and all rows are within TTL, serve list without ESPN.
+   * @returns {Promise<object[]|null>}
+   */
+  async tryGetAllTeamsFromDb() {
+    const rows = await teamRepository.listAll();
+    if (rows.length < 30) return null;
+
+    const now = Date.now();
+    for (const row of rows) {
+      const age = now - new Date(row.fetched_at).getTime();
+      if (age >= TEAM_DB_CACHE_TTL_MS) return null;
+    }
+
+    const mapped = rows.map((row) => this.mapDbRowToListTeam(row));
+    mapped.sort((a, b) =>
+      String(a.abbreviation || '').localeCompare(String(b.abbreviation || ''))
+    );
+    return mapped;
+  }
+
+  /**
+   * Persist list shape to DB (warm cache for Swish without calling /by-id).
+   * @param {object[]} teamList — items like getAllTeams() returns
+   */
+  async persistTeamListToDb(teamList) {
+    for (const t of teamList) {
+      try {
+        await teamRepository.upsertTeam({
+          espn_team_id: String(t.id),
+          abbreviation: t.abbreviation,
+          slug: t.slug ?? null,
+          name: t.name,
+          city: t.city ?? null,
+          logo_url: t.logo ?? null,
+        });
+      } catch (err) {
+        logger.warn(
+          { component: 'teamService', task: 'persistTeamList', teamId: t.id, errorMessage: err.message },
+          'teams upsert skipped'
+        );
+      }
+    }
+  }
+
+  /** Map raw ESPN `team` node to teams-table upsert payload */
+  normalizeRawTeamForDb(t) {
+    if (!t?.id || !t.abbreviation) return null;
+    const displayName = t.displayName || `${t.location || ''} ${t.name || ''}`.trim();
+    const parts = displayName.split(/\s+/).filter(Boolean);
+    const city = parts.length > 1 ? parts.slice(0, -1).join(' ') : (t.location || '');
+    const name = parts.length ? parts[parts.length - 1] : displayName;
+    return {
+      espn_team_id: String(t.id),
+      abbreviation: String(t.abbreviation),
+      slug: t.slug ?? null,
+      name,
+      city: city || null,
+      logo_url: t.logos?.[0]?.href ?? null,
+    };
+  }
+
   async getAllTeams() {
     const cacheKey = 'all_teams_list';
     const cached = this.cache.get(cacheKey);
 
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
       return cached.data;
+    }
+
+    const fromDb = await this.tryGetAllTeamsFromDb();
+    if (fromDb) {
+      this.cache.set(cacheKey, { data: fromDb, timestamp: Date.now() });
+      return fromDb;
     }
 
     try {
@@ -94,6 +162,8 @@ class TeamService {
           };
         })
         .filter((t) => t.id && t.abbreviation);
+
+      await this.persistTeamListToDb(result);
 
       this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
@@ -223,6 +293,18 @@ class TeamService {
         data: data.team,
         timestamp: Date.now()
       });
+
+      const normalized = this.normalizeRawTeamForDb(data.team);
+      if (normalized) {
+        try {
+          await teamRepository.upsertTeam(normalized);
+        } catch (err) {
+          logger.warn(
+            { component: 'teamService', task: 'info', teamAbbreviation, errorMessage: err.message },
+            'teams upsert after getTeamInfo failed'
+          );
+        }
+      }
 
       return data.team;
     } catch (error) {
