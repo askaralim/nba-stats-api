@@ -94,6 +94,11 @@ class WebServer {
   }
 
   setupCronJobs() {
+    if (process.env.NODE_ENV === 'test') {
+      logger.info({ component: 'cron' }, 'Skipping cron and startup pre-fetch in NODE_ENV=test');
+      return;
+    }
+
     logger.info({ component: 'startup' }, 'Initializing startup pre-fetch');
 
     nbaService.getTodaysScoreboard().catch((err) => {

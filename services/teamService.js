@@ -8,6 +8,11 @@ const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations'
 const { formatPlayerNameForDisplay } = require('../utils/playerName');
 const { fetchWithRetry } = require('../utils/retry');
 const logger = require('../utils/logger');
+const { NotFoundError } = require('../middleware/errorHandler');
+const teamRepository = require('../repositories/teamRepository');
+
+/** DB-backed cache TTL for team basics (matches ESPN read-through slice). */
+const TEAM_DB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const ESPN_FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -96,6 +101,59 @@ class TeamService {
       logger.error({ component: 'teamService', task: 'allTeams', err: error }, 'Error fetching all teams');
       throw error;
     }
+  }
+
+  /**
+   * Map a `teams` table row to the same shape as items from getAllTeams().
+   * @param {import('pg').QueryResultRow} row
+   * @returns {object}
+   */
+  mapDbRowToListTeam(row) {
+    return {
+      id: row.espn_team_id,
+      abbreviation: row.abbreviation,
+      slug: row.slug,
+      name: row.name,
+      displayName: row.city ? `${row.city} ${row.name}` : row.name,
+      city: row.city || '',
+      nameZhCN: getTeamNameZhCn(row.name),
+      cityZhCN: getTeamCityZhCn(row.city || ''),
+      logo: row.logo_url,
+    };
+  }
+
+  /**
+   * Read-through cache: team list row by ESPN team id (string or number).
+   * Uses Postgres `teams` when configured and row is fresh; else fetches ESPN list and upserts.
+   * @param {string|number} espnTeamId
+   * @returns {Promise<object>} Same shape as getAllTeams() item
+   */
+  async getTeamBasicByEspnId(espnTeamId) {
+    const idStr = String(espnTeamId);
+    const row = await teamRepository.getByEspnTeamId(idStr);
+    if (row) {
+      const age = Date.now() - new Date(row.fetched_at).getTime();
+      if (age < TEAM_DB_CACHE_TTL_MS) {
+        return this.mapDbRowToListTeam(row);
+      }
+    }
+
+    const teams = await this.getAllTeams();
+    const match = teams.find((t) => String(t.id) === idStr);
+    if (!match) {
+      throw new NotFoundError(`NBA team (${idStr})`);
+    }
+
+    await teamRepository.upsertTeam({
+      espn_team_id: idStr,
+      abbreviation: match.abbreviation,
+      slug: match.slug ?? null,
+      name: match.name,
+      city: match.city ?? null,
+      logo_url: match.logo ?? null,
+    });
+
+    return match;
   }
 
   /**

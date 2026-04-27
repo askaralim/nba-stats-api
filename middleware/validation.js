@@ -134,11 +134,29 @@ const validateGameFilters = (req, res, next) => {
   next();
 };
 
+/**
+ * ESPN NBA team id (numeric string from site API).
+ */
+const validateEspnTeamId = (req, res, next) => {
+  const { teamId } = req.params;
+
+  if (!teamId) {
+    return next(new ValidationError('teamId parameter is required'));
+  }
+
+  if (!/^\d+$/.test(teamId)) {
+    return next(new ValidationError('teamId must be a numeric ESPN team id'));
+  }
+
+  next();
+};
+
 module.exports = {
   validateGameId,
   validateDate,
   validateTeamAbbreviation,
   validatePlayerId,
+  validateEspnTeamId,
   validatePagination,
   validateGameFilters
 };

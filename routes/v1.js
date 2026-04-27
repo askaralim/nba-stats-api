@@ -21,6 +21,7 @@ const {
   validateDate,
   validateTeamAbbreviation,
   validatePlayerId,
+  validateEspnTeamId,
   validatePagination,
   validateGameFilters
 } = require('../middleware/validation');
@@ -304,6 +305,16 @@ router.get('/nba/teams',
   asyncHandler(async (req, res) => {
     const teams = await teamService.getAllTeams();
     sendSuccess(res, { teams }, null, 200, { version: 'v1' });
+  })
+);
+
+// Team basics by ESPN id (DB read-through cache when Postgres is configured)
+router.get('/nba/teams/by-id/:teamId',
+  validateEspnTeamId,
+  asyncHandler(async (req, res) => {
+    const { teamId } = req.params;
+    const team = await teamService.getTeamBasicByEspnId(teamId);
+    sendSuccess(res, { team }, null, 200, { version: 'v1' });
   })
 );
 
