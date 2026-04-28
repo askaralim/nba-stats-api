@@ -7,6 +7,11 @@ const { getTeamNameZhCn, getTeamCityZhCn } = require('../utils/teamTranslations'
 const seasonDefaults = require('../config/seasonDefaults');
 const { fetchWithRetry } = require('../utils/retry');
 const logger = require('../utils/logger');
+const db = require('../config/db');
+const standingsRepository = require('../repositories/standingsRepository');
+
+/** Postgres standings snapshot TTL (shorter than team basics — standings change nightly). */
+const STANDINGS_DB_CACHE_TTL_MS = 30 * 60 * 1000;
 
 class StandingsService {
   constructor() {
@@ -95,6 +100,155 @@ class StandingsService {
   }
 
   /**
+   * Build persistence rows from API-shaped standings (after ESPN transform).
+   * @param {object} transformedData
+   * @returns {object[]}
+   */
+  buildEntriesForInsert(transformedData) {
+    const { season, seasonType, conferences } = transformedData;
+    const out = [];
+    for (const [conferenceKey, conf] of Object.entries(conferences)) {
+      conf.teams.forEach((team, index) => {
+        out.push({
+          season_year: season,
+          season_type: seasonType,
+          espn_team_id: String(team.id),
+          conference_key: conferenceKey,
+          conference_id: conf.id != null ? String(conf.id) : null,
+          conference_name: conf.name ?? null,
+          conference_abbreviation: conf.abbreviation ?? null,
+          sort_order: index + 1,
+          wins: team.wins,
+          losses: team.losses,
+          win_percent: team.winPercent,
+          games_behind: team.gamesBehind,
+          playoff_seed: team.playoffSeed,
+          home_wins: team.homeWins,
+          home_losses: team.homeLosses,
+          away_wins: team.awayWins,
+          away_losses: team.awayLosses,
+          streak: team.streak,
+          streak_display: team.streakType,
+          espn_team_uid: team.uid != null ? String(team.uid) : null,
+          short_display_name: team.shortName ?? null,
+          team_location: team.location ?? null,
+          team_name: team.name,
+          team_city: team.city,
+          team_abbreviation: team.abbreviation,
+          logo_url: team.logo,
+        });
+      });
+    }
+    return out;
+  }
+
+  /**
+   * @param {import('pg').QueryResultRow} row
+   * @returns {object}
+   */
+  mapDbRowToTeam(row) {
+    const idRaw = String(row.espn_team_id);
+    const id = /^\d+$/.test(idRaw) ? parseInt(idRaw, 10) : idRaw;
+    const wp = row.win_percent != null ? Number(row.win_percent) : null;
+    const gb = row.games_behind != null ? Number(row.games_behind) : null;
+
+    return {
+      id,
+      uid: row.espn_team_uid,
+      name: row.team_name,
+      nameZhCN: getTeamNameZhCn(row.team_name),
+      city: row.team_city,
+      cityZhCN: getTeamCityZhCn(row.team_city),
+      shortName: row.short_display_name,
+      abbreviation: row.team_abbreviation,
+      location: row.team_location,
+      logo: row.logo_url,
+      wins: row.wins,
+      losses: row.losses,
+      winPercent: wp,
+      winPercentDisplay: this.formatWinPercent(wp),
+      playoffSeed: row.playoff_seed,
+      gamesBehind: gb,
+      gamesBehindDisplay: this.formatGamesBehind(gb),
+      homeWins: row.home_wins,
+      homeLosses: row.home_losses,
+      awayWins: row.away_wins,
+      awayLosses: row.away_losses,
+      streak: row.streak,
+      streakType: row.streak_display,
+    };
+  }
+
+  /**
+   * @param {import('pg').QueryResultRow} meta
+   * @param {import('pg').QueryResultRow[]} rows
+   */
+  buildFromDbRows(meta, rows, season, seasonType) {
+    const conferences = {};
+    for (const row of rows) {
+      const key = row.conference_key;
+      if (!conferences[key]) {
+        conferences[key] = {
+          id: row.conference_id,
+          name: row.conference_name,
+          abbreviation: row.conference_abbreviation,
+          season,
+          seasonType,
+          seasonDisplayName:
+            meta.season_display_name || `${season - 1}-${season}`,
+          teams: [],
+        };
+      }
+      conferences[key].teams.push(this.mapDbRowToTeam(row));
+    }
+
+    return {
+      season,
+      seasonType,
+      seasonDisplayName: meta.season_display_name || `${season - 1}-${season}`,
+      conferences,
+    };
+  }
+
+  /**
+   * Load standings from Postgres if snapshot exists and is fresh enough.
+   * @returns {Promise<object|null>}
+   */
+  async tryGetStandingsFromDb(season, seasonType) {
+    if (!db.isConfigured) return null;
+
+    const meta = await standingsRepository.getMeta(season, seasonType);
+    if (!meta) return null;
+
+    const age = Date.now() - new Date(meta.fetched_at).getTime();
+    if (age >= STANDINGS_DB_CACHE_TTL_MS) return null;
+
+    const rows = await standingsRepository.listEntries(season, seasonType);
+    if (!rows.length) return null;
+
+    const minTeams = seasonType === 2 ? 28 : 4;
+    if (rows.length < minTeams) return null;
+
+    return this.buildFromDbRows(meta, rows, season, seasonType);
+  }
+
+  async persistStandingsSnapshot(transformedData) {
+    try {
+      await standingsRepository.replaceSnapshot({
+        seasonYear: transformedData.season,
+        seasonType: transformedData.seasonType,
+        seasonDisplayName: transformedData.seasonDisplayName,
+        entries: this.buildEntriesForInsert(transformedData),
+      });
+    } catch (err) {
+      logger.warn(
+        { component: 'standingsService', task: 'persistSnapshot', errorMessage: err.message },
+        'Failed to persist standings snapshot'
+      );
+    }
+  }
+
+  /**
    * Fetch NBA standings
    * @param {Object} options - Query options
    * @param {number} options.season - Season year (default: 2026)
@@ -112,6 +266,15 @@ class StandingsService {
     
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
       return cached.data;
+    }
+
+    const fromDb = await this.tryGetStandingsFromDb(season, seasonType);
+    if (fromDb) {
+      this.cache.set(cacheKey, {
+        data: fromDb,
+        timestamp: Date.now(),
+      });
+      return fromDb;
     }
 
     try {
@@ -182,6 +345,8 @@ class StandingsService {
         seasonDisplayName: seasonDisplayName,
         conferences: conferences
       };
+
+      await this.persistStandingsSnapshot(transformedData);
 
       // Cache the response
       this.cache.set(cacheKey, {
