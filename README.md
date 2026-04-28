@@ -94,7 +94,7 @@ CORS_ORIGIN=http://localhost:5173
 
 ### Database (PostgreSQL)
 
-Optional but recommended for production: **news v2**, **push tokens**, **cached team basics** (`teams`), and **league calendar phase** (`league_seasons`). When Postgres is configured, **`GET /api/v1/nba/teams`** (used by Swish and other clients) fills and then serves the full team list from the DB when all 30 rows exist and are within TTL — no client changes. **`GET /api/v1/nba/teams/:abbrev`** upserts one row after each ESPN fetch. **`GET .../teams/by-id/:teamId`** is optional for diagnostics or future callers.
+Optional but recommended for production: **news v2**, **push tokens**, **cached team basics** (`teams`), **cached standings** (`standings_snapshot_meta`, `standings_entries`), and **league calendar phase** (`league_seasons`). When Postgres is configured, **`GET /api/v1/nba/teams`** (used by Swish and other clients) fills and then serves the full team list from the DB when all 30 rows exist and are within TTL — no client changes. **`GET /api/v1/nba/teams/:abbrev`** upserts one row after each ESPN fetch. **`GET /api/v1/nba/standings`** persists a snapshot after each ESPN fetch and can serve from the DB within a short TTL (see `standingsService`). **`GET .../teams/by-id/:teamId`** is optional for diagnostics or future callers.
 
 - **`DATABASE_URL`** (or `PGHOST` / `PGUSER` / `PGPASSWORD` / `PGDATABASE`) — see [`.env.example`](./.env.example). Railway public proxies (`*.rlwy.net`) use TLS; the pool applies `ssl` automatically via [`config/pgConnectionOptions.js`](./config/pgConnectionOptions.js).
 - **Migrations** (from repo root `nba-stats-api/`):

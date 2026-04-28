@@ -8,6 +8,8 @@
     "dev": "nodemon index.js",
     "migrate": "node scripts/run-migrations.js",
     "migrate:league-seasons": "node scripts/run-single-migration.js migrations/004_create_league_seasons.sql",
+    "migrate:teams": "node scripts/run-single-migration.js migrations/005_teams.sql",
+    "migrate:standings": "node scripts/run-single-migration.js migrations/006_standings_entries.sql",
     "capture-espn-samples": "node scripts/capture-espn-samples.js",
     "test": "vitest run",
     "test:watch": "vitest"

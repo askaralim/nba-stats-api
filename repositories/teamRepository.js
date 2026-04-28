@@ -20,15 +20,6 @@ async function getByEspnTeamId(espnTeamId) {
 }
 
 /**
- * @param {object} team
- * @param {string} team.espn_team_id
- * @param {string} team.abbreviation
- * @param {string|null} [team.slug]
- * @param {string} team.name
- * @param {string|null} [team.city]
- * @param {string|null} [team.logo_url]
- */
-/**
  * All cached team rows (for full-list read-through).
  * @returns {Promise<import('pg').QueryResultRow[]>}
  */
@@ -41,6 +32,15 @@ async function listAll() {
   return rows;
 }
 
+/**
+ * @param {object} team
+ * @param {string} team.espn_team_id
+ * @param {string} team.abbreviation
+ * @param {string|null} [team.slug]
+ * @param {string} team.name
+ * @param {string|null} [team.city]
+ * @param {string|null} [team.logo_url]
+ */
 async function upsertTeam(team) {
   if (!db.isConfigured) return;
   const {

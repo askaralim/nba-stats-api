@@ -30,6 +30,15 @@ describe('HTTP API (integration)', () => {
     expect(res.body.data.teams.length).toBeGreaterThan(0);
   });
 
+  it('GET /api/v1/nba/standings returns standings envelope', async () => {
+    const res = await request(app).get('/api/v1/nba/standings');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.season).toBeDefined();
+    expect(res.body.data.conferences).toBeDefined();
+    expect(typeof res.body.data.conferences).toBe('object');
+  });
+
   it('GET /api/v2/nba/translated-news returns JSON envelope', async () => {
     const res = await request(app)
       .get('/api/v2/nba/translated-news')
