@@ -111,6 +111,12 @@ Optional but recommended for production: **news v2**, **push tokens**, **cached 
 npm run dev
 ```
 
+**Lint (ESLint 9 flat config, `eslint.config.mjs`):**
+```bash
+npm run lint
+npm run lint:fix   # auto-fix where possible
+```
+
 **Production:**
 ```bash
 npm start
