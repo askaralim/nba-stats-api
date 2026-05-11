@@ -593,7 +593,8 @@ router.get('/nba/todayTopPerformers',
   })
 );
 
-// Get season leaders (top 3 PTS / REB / AST) — ESPN leaders API + seasonMeta for client toggle
+// Get season leaders (top 3 PTS / REB / AST) — espnScraperService.getLeaders uses Postgres
+// player-leaders snapshot (same as /nba/stats/players) when fresh, else ESPN leaders API + seasonMeta
 router.get('/nba/seasonLeaders',
   asyncHandler(async (req, res) => {
     let seasontype;

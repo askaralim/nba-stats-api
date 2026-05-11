@@ -107,3 +107,189 @@ describe('espnScraperService.buildEmptyTopPlayersByStat', () => {
     }
   });
 });
+
+describe('espnScraperService.topPlayersByStatToSwishLeaders', () => {
+  it('maps avgPoints/Rebounds/Assists blocks to points/rebounds/assists leader rows', () => {
+    const topPlayersByStat = espnScraperService.buildEmptyTopPlayersByStat();
+    topPlayersByStat.avgPoints.players.push({
+      id: '1',
+      name: 'A',
+      team: 'Team',
+      teamNameZhCN: '',
+      headshot: null,
+      stats: {
+        avgPoints: { displayValue: '30.0', rank: 1 },
+        gamesPlayed: {},
+      },
+    });
+    topPlayersByStat.avgRebounds.players.push({
+      id: '2',
+      name: 'B',
+      team: 'Team2',
+      teamNameZhCN: '',
+      headshot: null,
+      stats: {
+        avgRebounds: { displayValue: '12.0', rank: 1 },
+        gamesPlayed: {},
+      },
+    });
+    topPlayersByStat.avgAssists.players.push({
+      id: '3',
+      name: 'C',
+      team: 'Team3',
+      teamNameZhCN: '',
+      headshot: null,
+      stats: {
+        avgAssists: { displayValue: '11.0', rank: 1 },
+        gamesPlayed: {},
+      },
+    });
+    const out = espnScraperService.topPlayersByStatToSwishLeaders(topPlayersByStat);
+    expect(out.points[0].value).toBe('30.0');
+    expect(out.rebounds[0].value).toBe('12.0');
+    expect(out.assists[0].value).toBe('11.0');
+    expect(out.points[0].statType).toBe('avgPoints');
+  });
+});
+
+describe('espnScraperService.clampStatsPlayersLeadersLimit', () => {
+  it('matches getPlayerStats clamp (min 9, max 100, default 20)', () => {
+    expect(espnScraperService.clampStatsPlayersLeadersLimit(5)).toBe(9);
+    expect(espnScraperService.clampStatsPlayersLeadersLimit(20)).toBe(20);
+    expect(espnScraperService.clampStatsPlayersLeadersLimit(200)).toBe(100);
+  });
+});
+
+describe('PLAYER_LEADER_CATEGORY_MAP export', () => {
+  it('is exposed on the service for snapshot symmetry tests', () => {
+    expect(Array.isArray(espnScraperService.PLAYER_LEADER_CATEGORY_MAP)).toBe(true);
+    expect(espnScraperService.PLAYER_LEADER_CATEGORY_MAP.some((d) => d.statName === 'avgPoints')).toBe(
+      true
+    );
+  });
+});
+
+describe('espnScraperService.buildTopPlayersByStatFromLeaderRows', () => {
+  it('rebuilds categories from DB-shaped rows and fills missing stats as empty', () => {
+    const samplePlayer = {
+      id: '123',
+      name: 'Test Player',
+      headshot: null,
+      team: 'Lakers',
+      teamNameZhCN: '',
+      teamCityZhCN: '',
+      teamLogo: null,
+      position: 'G',
+      statRank: 1,
+      stats: {
+        avgPoints: {
+          value: 28.5,
+          rank: 1,
+          displayValue: '28.5',
+          label: '',
+          displayName: '',
+          description: '',
+          category: 'leaders',
+        },
+        gamesPlayed: {
+          value: null,
+          rank: null,
+          displayValue: '-',
+          label: 'GP',
+          displayName: 'Games Played',
+          description: '',
+          category: 'leaders',
+        },
+      },
+    };
+    const rows = [
+      {
+        stat_key: 'avgPoints',
+        rank: 1,
+        player_json: samplePlayer,
+      },
+    ];
+    const rebuilt = espnScraperService.buildTopPlayersByStatFromLeaderRows(rows);
+    expect(rebuilt.avgPoints.players).toHaveLength(1);
+    expect(rebuilt.avgPoints.players[0]).toEqual(samplePlayer);
+    expect(rebuilt.tripleDouble.players).toHaveLength(0);
+    expect(rebuilt.tripleDouble.title).toBe('三双次数');
+  });
+
+  it('sorts by rank within a stat category', () => {
+    const p1 = { statRank: 2, id: 'b', stats: {} };
+    const p2 = { statRank: 1, id: 'a', stats: {} };
+    const rows = [
+      { stat_key: 'avgRebounds', rank: 2, player_json: p1 },
+      { stat_key: 'avgRebounds', rank: 1, player_json: p2 },
+    ];
+    const rebuilt = espnScraperService.buildTopPlayersByStatFromLeaderRows(rows);
+    expect(rebuilt.avgRebounds.players.map((p) => p.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('espnScraperService.buildSnapshotRows', () => {
+  it('maps transformedData to meta + flat entries for persistence', () => {
+    const transformedData = {
+      metadata: {
+        season: '2025-2026',
+        seasonType: 'Regular Season',
+        seasonTypeId: 2,
+        position: 'All Positions',
+        totalCount: 50,
+      },
+      topPlayersByStat: {
+        avgPoints: {
+          title: '场均得分',
+          description: 'Points Per Game',
+          players: [
+            {
+              id: '1',
+              statRank: 1,
+              stats: { avgPoints: { displayValue: '30.0' }, gamesPlayed: {} },
+            },
+          ],
+        },
+      },
+    };
+    const { meta, entries } = espnScraperService.buildSnapshotRows(transformedData, 2026, 2, 50);
+    expect(meta).toMatchObject({
+      season_year: 2026,
+      season_type: 2,
+      leaders_limit: 50,
+      effective_season_type_id: 2,
+      season_label: '2025-2026',
+      total_count: 50,
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ stat_key: 'avgPoints', rank: 1 });
+    expect(entries[0].player_json.id).toBe('1');
+  });
+
+  it('round-trips through buildTopPlayersByStatFromLeaderRows', () => {
+    const transformedData = {
+      metadata: {
+        seasonTypeId: 2,
+        season: '2025-2026',
+        seasonType: 'Regular Season',
+        position: 'All Positions',
+        totalCount: 9,
+      },
+      topPlayersByStat: espnScraperService.buildEmptyTopPlayersByStat(),
+    };
+    transformedData.topPlayersByStat.avgAssists.players.push({
+      id: '99',
+      name: 'Assist King',
+      statRank: 1,
+      stats: {},
+    });
+    const { entries } = espnScraperService.buildSnapshotRows(transformedData, 2026, 2, 50);
+    const rows = entries.map((e) => ({
+      stat_key: e.stat_key,
+      rank: e.rank,
+      player_json: e.player_json,
+    }));
+    const rebuilt = espnScraperService.buildTopPlayersByStatFromLeaderRows(rows);
+    expect(rebuilt.avgAssists.players[0].name).toBe('Assist King');
+  });
+});

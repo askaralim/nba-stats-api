@@ -9,9 +9,14 @@ const seasonDefaults = require('../config/seasonDefaults');
 const seasonTypeCache = require('./seasonTypeCache');
 const leagueSeasonService = require('./leagueSeasonService');
 const logger = require('../utils/logger');
+const db = require('../config/db');
+const playerLeadersRepository = require('../repositories/playerLeadersRepository');
 
 /** Cached result of “can we load playoff leaders?” probe (avoid hitting ESPN every request). */
 const POSTSEASON_PROBE_TTL_MS = 30 * 60 * 1000;
+
+/** Postgres player-leaders snapshot TTL (aligned with standings-style read-through cache). */
+const PLAYER_LEADERS_DB_CACHE_TTL_MS = 30 * 60 * 1000;
 let postseasonProbeCache = { value: /** @type {boolean | null} */ null, at: 0 };
 
 /** Maps ESPN leaders `categories[].name` → `/nba/stats/players` `topPlayersByStat` keys (byathlete-era names). */
@@ -293,6 +298,130 @@ class ESPNScraperService {
     return out;
   }
 
+  /**
+   * Rebuild `topPlayersByStat` from denormalized DB rows ( player_leaders_entries ).
+   * @param {import('pg').QueryResultRow[]} rows
+   * @returns {object}
+   */
+  buildTopPlayersByStatFromLeaderRows(rows) {
+    const byStat = new Map();
+    for (const row of rows) {
+      const key = row.stat_key;
+      if (!byStat.has(key)) byStat.set(key, []);
+      byStat.get(key).push(row);
+    }
+    const out = {};
+    for (const def of PLAYER_LEADER_CATEGORY_MAP) {
+      const list = byStat.get(def.statName);
+      if (!list || list.length === 0) {
+        out[def.statName] = {
+          title: def.title,
+          description: def.description,
+          players: [],
+        };
+        continue;
+      }
+      list.sort((a, b) => Number(a.rank) - Number(b.rank));
+      const players = list.map((r) => r.player_json);
+      out[def.statName] = {
+        title: def.title,
+        description: def.description,
+        players,
+      };
+    }
+    return out;
+  }
+
+  /**
+   * @param {object} transformedData - ESPN-shaped payload (metadata + topPlayersByStat; may include seasonMeta)
+   * @param {number} year
+   * @param {number} seasonTypeRequested - parseSeason `seasonType`
+   * @param {number} leadersLimit
+   * @returns {{ meta: object, entries: object[] }}
+   */
+  buildSnapshotRows(transformedData, year, seasonTypeRequested, leadersLimit) {
+    const md = transformedData.metadata || {};
+    const effectiveId =
+      md.seasonTypeId != null && Number.isFinite(Number(md.seasonTypeId))
+        ? Number(md.seasonTypeId)
+        : 2;
+    const meta = {
+      season_year: year,
+      season_type: seasonTypeRequested,
+      leaders_limit: leadersLimit,
+      effective_season_type_id: effectiveId,
+      season_label: md.season ?? null,
+      season_type_display: md.seasonType ?? null,
+      position_label: md.position ?? null,
+      total_count: md.totalCount ?? null,
+    };
+    const entries = [];
+    const { topPlayersByStat } = transformedData;
+    if (!topPlayersByStat || typeof topPlayersByStat !== 'object') {
+      return { meta, entries };
+    }
+    for (const [statKey, block] of Object.entries(topPlayersByStat)) {
+      const players = block?.players || [];
+      players.forEach((player, idx) => {
+        const rank = player.statRank != null ? Number(player.statRank) : idx + 1;
+        entries.push({
+          stat_key: statKey,
+          rank,
+          player_json: player,
+        });
+      });
+    }
+    return { meta, entries };
+  }
+
+  /**
+   * @returns {Promise<object|null>} `{ metadata, topPlayersByStat }` without seasonMeta
+   */
+  async tryGetPlayerStatsFromDb(year, seasonType, leadersLimit) {
+    if (!db.isConfigured) return null;
+
+    const metaRow = await playerLeadersRepository.getMeta(year, seasonType, leadersLimit);
+    if (!metaRow) return null;
+
+    const age = Date.now() - new Date(metaRow.fetched_at).getTime();
+    if (age >= PLAYER_LEADERS_DB_CACHE_TTL_MS) return null;
+
+    const rows = await playerLeadersRepository.listEntries(year, seasonType, leadersLimit);
+    if (!rows.length) return null;
+
+    const topPlayersByStat = this.buildTopPlayersByStatFromLeaderRows(rows);
+    const effectiveId = Number(metaRow.effective_season_type_id);
+    return {
+      metadata: {
+        season: metaRow.season_label ?? `${year}-${year + 1}`,
+        seasonType: metaRow.season_type_display ?? (effectiveId === 3 ? 'Postseason' : 'Regular Season'),
+        seasonTypeId: Number.isFinite(effectiveId) ? effectiveId : 2,
+        position: metaRow.position_label ?? 'All Positions',
+        totalCount: metaRow.total_count != null ? metaRow.total_count : 0,
+      },
+      topPlayersByStat,
+    };
+  }
+
+  async persistPlayerLeadersSnapshot(transformedData, year, seasonTypeRequested, leadersLimit) {
+    if (!db.isConfigured) return;
+    try {
+      const { meta, entries } = this.buildSnapshotRows(
+        transformedData,
+        year,
+        seasonTypeRequested,
+        leadersLimit
+      );
+      if (!entries.length) return;
+      await playerLeadersRepository.replaceSnapshot(meta, entries);
+    } catch (err) {
+      logger.warn(
+        { component: 'espnScraper', task: 'persistPlayerLeaders', err: err.message },
+        'Failed to persist player leaders snapshot'
+      );
+    }
+  }
+
   async fetchLeadersJsonResilient(paramAttempts, limit) {
     let lastStatus = 0;
     const maxRetriesPerAttempt = 2;
@@ -364,6 +493,19 @@ class ESPNScraperService {
       return { ...payload, seasonMeta };
     }
 
+    const fromDb = await this.tryGetPlayerStatsFromDb(year, requestedSeasonType, leadersLimit);
+    if (fromDb) {
+      const id = fromDb.metadata?.seasonTypeId;
+      const typeForMeta = Number.isFinite(Number(id)) ? Number(id) : requestedSeasonType;
+      const seasonMeta = await this.resolveSeasonMeta(typeForMeta);
+      const result = { ...fromDb, seasonMeta };
+      this.cache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now(),
+      });
+      return result;
+    }
+
     try {
       const paramAttempts = this.buildLeadersParamAttempts(requestedSeasonType, year);
       const data = await this.fetchLeadersJsonResilient(paramAttempts, leadersLimit);
@@ -390,6 +532,8 @@ class ESPNScraperService {
         topPlayersByStat,
         seasonMeta,
       };
+
+      await this.persistPlayerLeadersSnapshot(transformedData, year, requestedSeasonType, leadersLimit);
 
       this.cache.set(cacheKey, {
         data: transformedData,
@@ -433,6 +577,71 @@ class ESPNScraperService {
   }
 
   /**
+   * Same clamp as GET /nba/stats/players — must match persisted snapshot keys.
+   * @param {number} n
+   * @returns {number}
+   */
+  clampStatsPlayersLeadersLimit(n) {
+    return Math.min(100, Math.max(9, Number(n) || 20));
+  }
+
+  /**
+   * Map stored `topPlayersByStat` → shapes used by GET /nba/seasonLeaders (points/rebounds/assists arrays).
+   * @param {object} topPlayersByStat
+   * @returns {{ points: object[], rebounds: object[], assists: object[] }}
+   */
+  topPlayersByStatToSwishLeaders(topPlayersByStat) {
+    const mapRow = (statKey) => {
+      const block = topPlayersByStat?.[statKey];
+      const players = block?.players || [];
+      return players.map((p) => ({
+        id: p.id != null ? p.id : null,
+        name: p.name,
+        team: p.team,
+        teamNameZhCN: p.teamNameZhCN,
+        teamAbbreviation: null,
+        headshot: p.headshot,
+        value: p.stats?.[statKey]?.displayValue ?? '-',
+        statType: statKey,
+      }));
+    };
+    return {
+      points: mapRow('avgPoints'),
+      rebounds: mapRow('avgRebounds'),
+      assists: mapRow('avgAssists'),
+    };
+  }
+
+  /**
+   * Read-through: reuse player-leaders DB snapshots from getPlayerStats / persistPlayerLeadersSnapshot.
+   * Tries multiple leaders_limit values so home (limit 5) can hit snapshots written by stats page (default 20).
+   *
+   * @param {number|undefined} seasontype - 2, 3, or undefined (use default season from env)
+   * @param {number} routeLimit - leaders API limit from caller (e.g. 5)
+   * @returns {Promise<{ leaders: object, metadata: object }|null>}
+   */
+  async tryGetLeadersFromPlayerLeadersDb(seasontype, routeLimit) {
+    if (!db.isConfigured) return null;
+
+    const parsed = this.parseSeason(seasonDefaults.ESPN_PLAYER_STATS_SEASON);
+    const year = parsed.year;
+    const seasonTypeForDb =
+      seasontype !== undefined && seasontype !== null ? seasontype : parsed.seasonType;
+
+    const L20 = this.clampStatsPlayersLeadersLimit(20);
+    const Lreq = this.clampStatsPlayersLeadersLimit(routeLimit);
+    const candidates = [...new Set([L20, Lreq, 50])];
+
+    for (const L of candidates) {
+      const snap = await this.tryGetPlayerStatsFromDb(year, seasonTypeForDb, L);
+      if (!snap?.topPlayersByStat) continue;
+      const leaders = this.topPlayersByStatToSwishLeaders(snap.topPlayersByStat);
+      return { leaders, metadata: snap.metadata };
+    }
+    return null;
+  }
+
+  /**
    * Fetch season leaders from ESPN Leaders API.
    * This API is purpose-built for top players by category and auto-detects the current season.
    *
@@ -453,6 +662,22 @@ class ESPNScraperService {
       const typeForMeta = Number.isFinite(rt) ? rt : seasontype ?? 2;
       const seasonMeta = await this.resolveSeasonMeta(typeForMeta);
       return { ...payload, seasonMeta };
+    }
+
+    const fromDb = await this.tryGetLeadersFromPlayerLeadersDb(seasontype, limit);
+    if (fromDb) {
+      const id = fromDb.metadata?.seasonTypeId;
+      const typeForMeta = Number.isFinite(Number(id)) ? Number(id) : seasontype ?? 2;
+      const seasonMeta = await this.resolveSeasonMeta(typeForMeta);
+      const result = {
+        ...fromDb.leaders,
+        seasonMeta,
+      };
+      this.cache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now(),
+      });
+      return result;
     }
 
     try {
@@ -519,4 +744,6 @@ class ESPNScraperService {
 
 }
 
-module.exports = new ESPNScraperService();
+const espnScraperService = new ESPNScraperService();
+espnScraperService.PLAYER_LEADER_CATEGORY_MAP = PLAYER_LEADER_CATEGORY_MAP;
+module.exports = espnScraperService;
