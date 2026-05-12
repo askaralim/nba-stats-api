@@ -1,6 +1,53 @@
 import { describe, it, expect } from 'vitest';
 import gameTransformer from '../../utils/gameTransformer.js';
 
+describe('gameTransformer.transformGame game times', () => {
+  const minimalCompetition = (overrides = {}) => ({
+    date: '2026-03-13T23:30Z',
+    status: { type: { name: 'STATUS_SCHEDULED', description: 'Scheduled' } },
+    competitors: [
+      {
+        homeAway: 'home',
+        team: { id: '8', name: 'Pistons', abbreviation: 'DET', displayName: 'Detroit Pistons' },
+        score: '0',
+      },
+      {
+        homeAway: 'away',
+        team: { id: '29', name: 'Grizzlies', abbreviation: 'MEM', displayName: 'Memphis Grizzlies' },
+        score: '0',
+      },
+    ],
+    ...overrides,
+  });
+
+  it('uses competition.date when summary header omits event.date', () => {
+    const event = {
+      id: '401810816',
+      shortName: 'MEM @ DET',
+      competitions: [minimalCompetition({ date: '2026-03-13T23:30Z' })],
+    };
+    const g = gameTransformer.transformGame(event);
+    expect(g.gameEt).toBe('2026-03-13T23:30Z');
+    expect(g.gameTimeGMT).not.toBeNull();
+    expect(g.gameEtFormatted).not.toBeNull();
+  });
+
+  it('prefers event.date when present (scoreboard shape)', () => {
+    const event = {
+      id: '1',
+      date: '2026-01-01T00:00Z',
+      shortName: 'A @ B',
+      competitions: [
+        minimalCompetition({
+          date: '2026-01-02T00:00Z',
+        }),
+      ],
+    };
+    const g = gameTransformer.transformGame(event);
+    expect(g.gameEt).toBe('2026-01-01T00:00Z');
+  });
+});
+
 describe('gameTransformer.mapStatus', () => {
   it('maps known ESPN status keys to internal codes', () => {
     expect(gameTransformer.mapStatus('STATUS_SCHEDULED')).toBe(1);

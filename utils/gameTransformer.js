@@ -223,7 +223,7 @@ class GameTransformer {
 
   /**
    * Transform single game data from ESPN event
-   * @param {Object} event - Raw ESPN event data
+   * @param {Object} event - Raw ESPN event (scoreboard `events[]` item, or summary `header`)
    * @returns {Object} Transformed game data
    */
   transformGame(event) {
@@ -232,6 +232,9 @@ class GameTransformer {
     }
 
     const competition = event.competitions[0];
+    // Scoreboard `events[]` include `date` on the event; summary `header` often omits it and
+    // only sets `competitions[0].date` (see ESPN site/v2 summary sample).
+    const gameDate = event.date || competition.date || null;
     const status = competition.status || {};
     const statusType = status.type || {};
     
@@ -277,8 +280,8 @@ class GameTransformer {
     }
 
     // Format game time for display (Chinese locale by default)
-    const gameEtFormatted = event.date 
-      ? dateFormatter.formatGameTimeForDisplay(event.date, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
+    const gameEtFormatted = gameDate
+      ? dateFormatter.formatGameTimeForDisplay(gameDate, { locale: 'zh-CN', timezone: 'Asia/Shanghai' })
       : null;
 
     const transformedGame = {
@@ -288,8 +291,8 @@ class GameTransformer {
       gameStatus: gameStatus,
       period: status.period || 0,
       gameClock: status.displayClock || '',
-      gameTimeGMT: event.date ? this.formatGameTime(event.date) : null,
-      gameEt: event.date || null,
+      gameTimeGMT: gameDate ? this.formatGameTime(gameDate) : null,
+      gameEt: gameDate,
       gameEtFormatted: gameEtFormatted, // Formatted date for display
       homeTeam: this.transformTeam(homeCompetitor),
       awayTeam: this.transformTeam(awayCompetitor),
